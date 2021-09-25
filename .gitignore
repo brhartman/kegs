@@ -1,0 +1,3 @@
+config.kegs
+*.o
+xkegs
