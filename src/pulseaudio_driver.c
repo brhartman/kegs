@@ -230,7 +230,7 @@ pulse_audio_start_stream()
 	}
 
 	g_pa_buffer_attr.maxlength = -1;		// Maximum server buffer
-	g_pa_buffer_attr.tlength = 4*g_preferred_rate/20;	// 1/20th sec
+	g_pa_buffer_attr.tlength = 4*g_preferred_rate/10;	// 1/10th sec
 	//g_pa_buffer_attr.prebuf = 4*g_preferred_rate/100;	// 1/100th sec
 	g_pa_buffer_attr.prebuf = -1;
 	g_pa_buffer_attr.minreq = 4*g_preferred_rate/60;	// 1/60th sec
