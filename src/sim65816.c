@@ -1198,6 +1198,8 @@ int	g_video_line_update_interval = 0;
 Fplus	g_recip_projected_pmhz_slow;
 Fplus	g_recip_projected_pmhz_fast;
 Fplus	g_recip_projected_pmhz_zip;
+Fplus	g_recip_projected_pmhz_x10;
+Fplus	g_recip_projected_pmhz_x100;
 Fplus	g_recip_projected_pmhz_unl;
 
 void
@@ -1295,6 +1297,7 @@ run_a2_one_vbl()
 	word32	ret, zip_speed_0tof, zip_speed_0tof_new;
 	int	zip_en, zip_follow_cps, type, motor_on, iwm_1, iwm_25, fast;
 	int	limit_speed, apple35_sel, zip_speed, faster_than_28, unl_speed;
+	int speed_x10, speed_x100;
 
 	fflush(stdout);
 
@@ -1309,6 +1312,16 @@ run_a2_one_vbl()
 	g_recip_projected_pmhz_fast.plus_2 = (2.0 / 2.8);
 	g_recip_projected_pmhz_fast.plus_3 = (3.0 / 2.8);
 	g_recip_projected_pmhz_fast.plus_x_minus_1 = (1.98 - (1.0/2.8));
+
+	g_recip_projected_pmhz_x10.plus_1 = (1.0 / 28.0);
+	g_recip_projected_pmhz_x10.plus_2 = (2.0 / 28.0);
+	g_recip_projected_pmhz_x10.plus_3 = (3.0 / 28.0);
+	g_recip_projected_pmhz_x10.plus_x_minus_1 = 1.01 - (1.0/28.0);
+
+	g_recip_projected_pmhz_x100.plus_1 = (1.0 / 280.0);
+	g_recip_projected_pmhz_x100.plus_2 = (2.0 / 280.0);
+	g_recip_projected_pmhz_x100.plus_3 = (3.0 / 280.0);
+	g_recip_projected_pmhz_x100.plus_x_minus_1 = 1.01 - (1.0/280.0);
 
 	zip_speed_0tof = g_zipgs_reg_c05a & 0xf0;
 	setup_zip_speeds();
@@ -1344,15 +1357,24 @@ run_a2_one_vbl()
 				(g_slow_525_emul_wr || !g_fast_disk_emul);
 		iwm_25 = (motor_on && apple35_sel) && !g_fast_disk_emul;
 		faster_than_28 = fast && (!iwm_1 && !iwm_25) && zip_en &&
-			((limit_speed == 0) || (limit_speed == 3));
+			((limit_speed == 0) || (limit_speed == 3) ||
+			(limit_speed == 4) || (limit_speed == 5));
 		zip_speed = faster_than_28 &&
 			((zip_speed_0tof != 0) || (limit_speed == 3) ||
 							(g_zipgs_unlock >= 4) );
-		unl_speed = faster_than_28 && !zip_speed;
+		speed_x10 = faster_than_28 && (limit_speed == 4);
+		speed_x100 = faster_than_28 && (limit_speed == 5);
+		unl_speed = faster_than_28 && !zip_speed && !speed_x10 && !speed_x100;
 		if(unl_speed) {
 			/* use unlimited speed */
 			fspeed_mult = g_projected_pmhz;
 			fplus_ptr = &g_recip_projected_pmhz_unl;
+		} else if(speed_x100) {
+			fspeed_mult = 2.5 * 100.0;
+			fplus_ptr = &g_recip_projected_pmhz_x100;
+		} else if(speed_x10) {
+			fspeed_mult = 2.5 * 10.0;
+			fplus_ptr = &g_recip_projected_pmhz_x10;
 		} else if(zip_speed) {
 			fspeed_mult = g_zip_pmhz;
 			fplus_ptr = &g_recip_projected_pmhz_zip;
@@ -1667,6 +1689,8 @@ update_60hz(double dcycs, double dtime_now)
 		case 1:	sp_str = "1Mhz"; break;
 		case 2:	sp_str = "2.8Mhz"; break;
 		case 3:	sp_str = "8.0Mhz"; break;
+		case 4:	sp_str = "28.0Mhz"; break;
+		case 5:	sp_str = "280.0Mhz"; break;
 		default: sp_str = "Unlimited"; break;
 		}
 

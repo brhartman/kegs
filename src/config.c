@@ -267,7 +267,7 @@ Cfg_menu g_cfg_main_menu[] = {
 { "Force X-windows display depth", KNMP(g_force_depth), CFGTYPE_INT },
 { "Auto-update config.kegs,0,Manual,1,Immediately",
 		KNMP(g_config_kegs_auto_update), CFGTYPE_INT },
-{ "Speed,0,Unlimited,1,1.0MHz,2,2.8MHz,3,8.0MHz (Zip)",
+{ "Speed,0,Unlimited,1,1.0MHz,2,2.8MHz,3,8.0MHz (Zip),4,28.0MHz,5,280.0MHz",
 		KNMP(g_limit_speed), CFGTYPE_INT },
 { "Expansion Mem Size,0,0MB,0x100000,1MB,0x200000,2MB,0x300000,3MB,"
 	"0x400000,4MB,0x600000,6MB,0x800000,8MB,0xa00000,10MB,0xc00000,12MB,"
