@@ -1,7 +1,7 @@
 # KEGS - Kent's Emulated GS
 ## An Apple IIgs emulator for Mac OS X, Linux, and Unix/X11
 
-This is a fork of the official version [KEGS](http://kegs.sourceforge.net/).
+This is a fork of the official version of [KEGS](http://kegs.sourceforge.net/).
 
 There are a couple of changes:
 
