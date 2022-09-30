@@ -1825,7 +1825,7 @@ adb_increment_speed()
 	const char *str;
 
 	g_limit_speed++;
-	if(g_limit_speed > 3) {
+	if(g_limit_speed > 5) {
 		g_limit_speed = 0;
 	}
 
@@ -1842,6 +1842,12 @@ adb_increment_speed()
 		break;
 	case 3:
 		str = "...8.0MHz!";
+		break;
+	case 4:
+		str = "...28.0MHz!";
+		break;
+	case 5:
+		str = "...280.0MHz!";
 		break;
 	}
 	printf("Toggling g_limit_speed to %d%s\n", g_limit_speed, str);
