@@ -1,8 +1,8 @@
-const char rcsid_scc_socket_driver_c[] = "@(#)$KmKId: scc_socket_driver.c,v 1.22 2021-11-12 05:00:30+00 kentd Exp $";
+const char rcsid_scc_socket_driver_c[] = "@(#)$KmKId: scc_socket_driver.c,v 1.37 2025-04-29 22:17:38+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2021 by Kent Dickey		*/
+/*			Copyright 2002-2025 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -12,30 +12,56 @@ const char rcsid_scc_socket_driver_c[] = "@(#)$KmKId: scc_socket_driver.c,v 1.22
 /*	You may contact the author at: kadickey@alumni.princeton.edu	*/
 /************************************************************************/
 
-/* This file contains the socket calls */
+// This file contains the socket calls for Win32 and Mac/Linux
+// Win32: see: https://learn.microsoft.com/en-us/windows/win32/api/winsock2/
+
+// Modem init string GBBS GSPORT.HST: ats0=1s2=128v0
+// Modem init string Warp6: atm0e0v0s0=0s7=25   atx4h0  at&c1&d2
 
 #include "defc.h"
+
 #include "scc.h"
 #include <signal.h>
 
+extern int Verbose;
 extern Scc g_scc[2];
-extern int g_serial_modem[];
+extern int g_serial_cfg[2];
+extern char *g_serial_remote_ip[2];
+extern int g_serial_remote_port[2];
+extern int g_serial_modem_response_code;
+extern int g_serial_modem_allow_incoming;
+extern int g_serial_modem_init_telnet;
 
+#ifdef _WIN32
+#include <winsock2.h>
+typedef int socklen_t;
+#endif
+
+#ifndef _WIN32
 extern int h_errno;
+#endif
+
 int g_wsastartup_called = 0;
 
-/* Usage: scc_socket_init() called to init socket mode */
+#ifndef _WIN32
+// SOCKET is defined in scc.h, and is an "int" for non-Windows systems
+// INVALID_SOCKET is -1 for non-WINDOWS
+# define closesocket(s)		close(s)
+#endif
+
+/* Usage: scc_socket_open() called to init socket mode */
 /*  At all times, we try to have a listen running on the incoming socket */
 /* If we want to dial out, we close the incoming socket and create a new */
 /*  outgoing socket.  Any hang-up causes the socket to be closed and it will */
 /*  then re-open on a subsequent call to scc_socket_open */
 
 void
-scc_socket_init(int port)
+scc_socket_open(dword64 dfcyc, int port, int cfg)
 {
 	Scc	*scc_ptr;
 
-#ifdef _WIN32
+	// printf("scc_socket_open p:%d cfg:%d\n", port, cfg);
+#if defined(_WIN32) && defined(SCC_SOCKETS)
 	WSADATA	wsadata;
 	int	ret;
 
@@ -46,59 +72,180 @@ scc_socket_init(int port)
 	}
 #endif
 	scc_ptr = &(g_scc[port]);
-	scc_ptr->state = 1;		/* successful socket */
-	scc_ptr->sockfd = -1;		/* Indicate no socket open yet */
-	scc_ptr->accfd = -1;		/* Indicate no socket open yet */
-	scc_ptr->rdwrfd = -1;		/* Indicate no socket open yet */
-	scc_ptr->socket_state = -2;	/* 0 means talk to "modem" */
-					/* 1 connected */
+	scc_ptr->cur_state = cfg;		// successful socket
+	scc_ptr->sockfd = INVALID_SOCKET; /* Indicate no socket open yet */
+	scc_ptr->rdwrfd = INVALID_SOCKET; /* Indicate no socket open yet */
+	scc_ptr->modem_state = 0;	/* 0 means talk to socket */
+					/* 1 means talk to modem */
+	scc_ptr->socket_error = 0;
 	scc_ptr->socket_num_rings = 0;
-	scc_ptr->socket_last_ring_dcycs = 0;
-	scc_ptr->dcd = 0;		/* 0 means no carrier */
-	scc_ptr->modem_s0_val = 0;
-	scc_ptr->host_aux1 = sizeof(struct sockaddr_in);
-	scc_ptr->host_handle = malloc(scc_ptr->host_aux1);
-	/* Real init will be done when bytes need to be read/write from skt */
+	scc_ptr->socket_last_ring_dfcyc = 0;
+	scc_ptr->dcd = 1;		/* 1 means carrier */
+	scc_ptr->modem_s0_val = 0;		// Number of rings before answer
+	scc_ptr->sockaddr_size = sizeof(struct sockaddr_in);
+	free(scc_ptr->sockaddr_ptr);
+	scc_ptr->sockaddr_ptr = malloc(scc_ptr->sockaddr_size);
+
+	// cfg==1: Virtual Modem.  All set up, wait for AT commands now
+	// cfg==2: Outgoing connection to g_serial_remote_ip[], do it now
+	// cfg==3: Incoming connection on 6501/6502.  Do it now
+	if(cfg == 2) {
+		scc_ptr->modem_state = 0;
+		// Do not open it now, it will be opened when output is
+		//  sent to the port
+	}
+	if(cfg == 1) {
+		scc_ptr->modem_state = 1;
+		scc_ptr->dcd = 0;
+		scc_socket_open_incoming(dfcyc, port);
+	} else if(cfg == 3) {
+		scc_ptr->modem_state = 0;
+		scc_socket_open_incoming(dfcyc, port);
+	}
 }
 
 void
-scc_socket_maybe_open_incoming(int port, double dcycs)
+scc_socket_close(int port)
+{
+#ifdef SCC_SOCKETS
+	Scc	*scc_ptr;
+	SOCKET	rdwrfd;
+	SOCKET	sockfd;
+	int	do_init;
+	int	i;
+
+	scc_ptr = &(g_scc[port]);
+
+	// printf("In scc_socket_close, %d\n", port);
+
+	rdwrfd = scc_ptr->rdwrfd;
+	do_init = 0;
+	if(rdwrfd != INVALID_SOCKET) {
+		printf("socket_close: rdwrfd=%llx, closing\n", (dword64)rdwrfd);
+		closesocket(rdwrfd);
+		do_init = 1;
+	}
+	sockfd = scc_ptr->sockfd;
+	if((sockfd != INVALID_SOCKET) && (rdwrfd != sockfd)) {
+		printf("socket_close: sockfd=%llx, closing\n", (dword64)sockfd);
+		closesocket(sockfd);
+		do_init = 1;
+	}
+
+	scc_ptr->modem_state = 0;
+	scc_ptr->socket_num_rings = 0;
+	if(scc_ptr->cur_state == 1) {			// Virtual modem
+		scc_ptr->modem_state = 1;
+		scc_ptr->dcd = 0;
+	}
+	if(do_init) {
+		scc_ptr->modem_cmd_len = 0;
+		scc_ptr->telnet_iac = 0;
+		for(i = 0; i < 2; i++) {
+			scc_ptr->telnet_local_mode[i] = 0;
+			scc_ptr->telnet_remote_mode[i] = 0;
+			scc_ptr->telnet_reqwill_mode[i] = 0;
+			scc_ptr->telnet_reqdo_mode[i] = 0;
+		}
+		scc_ptr->rdwrfd = INVALID_SOCKET;
+		scc_ptr->sockfd = INVALID_SOCKET;
+	}
+#endif
+}
+
+void
+scc_socket_close_extended(dword64 dfcyc, int port, int allow_retry)
+{
+#ifdef SCC_SOCKETS
+	Scc	*scc_ptr;
+
+	// printf("In scc_socket_close_extended, %d, %016llx\n", port, dfcyc);
+	scc_socket_close(port);
+
+	scc_ptr = &(g_scc[port]);
+	if(scc_ptr->cur_state == 1) {		// Virtual modem mode
+		scc_socket_send_modem_code(dfcyc, port, 3);
+		scc_ptr->modem_state = 1;	// and go back to modem mode
+	} else if((scc_ptr->cur_state == 2) && !allow_retry) {	// Remote IP
+		scc_ptr->cur_state = -2;	// Error, give up
+	}
+#endif
+}
+
+void
+scc_socket_maybe_open(dword64 dfcyc, int port, int must)
 {
 	Scc	*scc_ptr;
-	struct sockaddr_in sa_in;
-	int	on;
-	int	ret;
+
+	scc_ptr = &(g_scc[port]);
+
+	if(scc_ptr->sockfd != INVALID_SOCKET) {
+		// Valid socket.  See if we should hang up
+		if((scc_ptr->reg[5] & 0x80) && (scc_ptr->cur_state == 1)) {
+			// Handle DTR forcing modem hang-up now
+			printf("DTR is deasserted, hanging up\n");
+			scc_socket_close(port);
+		}
+		return;
+	}
+	if(scc_ptr->cur_state == 2) {
+		if(must) {
+			scc_socket_open_outgoing(dfcyc, port,
+					g_serial_remote_ip[port],
+					g_serial_remote_port[port]);
+		}
+	} else {
+		scc_socket_open_incoming(dfcyc, port);
+	}
+}
+
+void
+scc_socket_open_incoming(dword64 dfcyc, int port)
+{
+#ifdef SCC_SOCKETS
 	SOCKET	sockfd;
-	int	inc;
+	struct sockaddr_in sa_in;
+	Scc	*scc_ptr;
+	int	on, ret, inc;
 
 	inc = 0;
 
 	scc_ptr = &(g_scc[port]);
 
-	if(scc_ptr->sockfd != (SOCKET)-1) {
+	if(scc_ptr->sockfd != INVALID_SOCKET) {
 		/* it's already open, get out */
 		return;
 	}
-	if(scc_ptr->socket_state < 0) {
-		/* not initialized, get out */
-		return;
-	}
 
-	printf("scc socket close being called from socket_open_out\n");
-	scc_socket_close(port, 0, dcycs);
+	//printf("scc_socket_open_incoming: scc socket close being called\n");
+	scc_socket_close(port);
 
-	scc_ptr->socket_state = 0;
 	scc_ptr->socket_num_rings = 0;
 
-	memset(scc_ptr->host_handle, 0, scc_ptr->host_aux1);
+	memset(scc_ptr->sockaddr_ptr, 0, scc_ptr->sockaddr_size);
+
+	if(scc_ptr->cur_state == 2) {
+		// Outgoing connection only, never accept an incoming connect
+		return;
+	}
+	if(scc_ptr->cur_state == 1) {
+		if(!g_serial_modem_allow_incoming) {
+			// Virtual modem with incoming connections disallowed
+			return;
+		}
+		if(scc_ptr->reg[5] & 0x80) {
+			// DTR is forcing hang-up.  Don't open incoming socket
+			return;
+		}
+	}
 
 	while(1) {
 		sockfd = socket(AF_INET, SOCK_STREAM, 0);
-		printf("sockfd ret: %d\n", sockfd);
-		if(sockfd == (SOCKET)-1) {
-			printf("socket ret: %d, errno: %d\n", sockfd, errno);
-			scc_socket_close(port, 0, dcycs);
-			scc_ptr->socket_state = -1;
+		//printf("sockfd ret: %llx\n", (dword64)sockfd);
+		if(sockfd == INVALID_SOCKET) {
+			printf("socket ret: -1, errno: %d\n", errno);
+			scc_socket_close(port);
+			scc_ptr->socket_error = -1;
 			return;
 		}
 		/* printf("socket ret: %d\n", sockfd); */
@@ -109,8 +256,7 @@ scc_socket_maybe_open_incoming(int port, double dcycs)
 		if(ret < 0) {
 			printf("setsockopt REUSEADDR ret: %d, err:%d\n",
 				ret, errno);
-			scc_socket_close(port, 0, dcycs);
-			scc_ptr->socket_state = -1;
+			scc_socket_close(port);
 			return;
 		}
 
@@ -120,20 +266,21 @@ scc_socket_maybe_open_incoming(int port, double dcycs)
 		sa_in.sin_addr.s_addr = htonl(INADDR_ANY);
 
 		ret = bind(sockfd, (struct sockaddr *)&sa_in, sizeof(sa_in));
+		printf("bind ret:%d\n", ret);
 
 		if(ret >= 0) {
 			ret = listen(sockfd, 1);
 			break;
 		}
 		/* else ret to bind was < 0 */
-		printf("bind ret: %d, errno: %d\n", ret, errno);
+		printf("bind or listen ret: %d, errno: %d\n", ret, errno);
 		inc++;
-		close(sockfd);
+		closesocket(sockfd);
 		printf("Trying next port: %d\n", 6501 + port + inc);
 		if(inc >= 10) {
 			printf("Too many retries, quitting\n");
-			scc_socket_close(port, 0, dcycs);
-			scc_ptr->socket_state = -1;
+			scc_socket_close(port);
+			scc_ptr->socket_error = -1;
 			return;
 		}
 	}
@@ -141,15 +288,17 @@ scc_socket_maybe_open_incoming(int port, double dcycs)
 	printf("SCC port %d is at unix port %d\n", port, 6501 + port + inc);
 
 	scc_ptr->sockfd = sockfd;
-	scc_ptr->state = 1;		/* successful socket */
+	scc_ptr->socket_error = 0;
 
-	scc_socket_make_nonblock(port, dcycs);
-
+	scc_socket_make_nonblock(dfcyc, port);
+#endif
 }
 
 void
-scc_socket_open_outgoing(int port, double dcycs)
+scc_socket_open_outgoing(dword64 dfcyc, int port, const char *remote_ip_str,
+						int remote_port)
 {
+#ifdef SCC_SOCKETS
 	Scc	*scc_ptr;
 	struct sockaddr_in sa_in;
 	struct hostent *hostentptr;
@@ -159,18 +308,16 @@ scc_socket_open_outgoing(int port, double dcycs)
 
 	scc_ptr = &(g_scc[port]);
 
-	printf("scc socket close being called from socket_open_out\n");
-	scc_socket_close(port, 0, dcycs);
+	// printf("scc socket close being called from socket_open_out\n");
+	scc_socket_close(port);
 
-	scc_ptr->socket_state = 0;
-
-	memset(scc_ptr->host_handle, 0, scc_ptr->host_aux1);
+	memset(scc_ptr->sockaddr_ptr, 0, scc_ptr->sockaddr_size);
 
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	printf("sockfd ret: %d\n", sockfd);
-	if(sockfd == (SOCKET)-1) {
-		printf("socket ret: %d, errno: %d\n", sockfd, errno);
-		scc_socket_close(port, 1, dcycs);
+	// printf("outgoing sockfd ret: %llx\n", (dword64)sockfd);
+	if(sockfd == INVALID_SOCKET) {
+		printf("socket ret: %llx, errno: %d\n", (dword64)sockfd, errno);
+		scc_socket_close_extended(dfcyc, port, 0);
 		return;
 	}
 	/* printf("socket ret: %d\n", sockfd); */
@@ -181,16 +328,18 @@ scc_socket_open_outgoing(int port, double dcycs)
 	if(ret < 0) {
 		printf("setsockopt REUSEADDR ret: %d, err:%d\n",
 			ret, errno);
-		scc_socket_close(port, 1, dcycs);
+		scc_socket_close_extended(dfcyc, port, 0);
 		return;
 	}
 
 	memset(&sa_in, 0, sizeof(sa_in));
 	sa_in.sin_family = AF_INET;
-	sa_in.sin_port = htons(scc_ptr->modem_out_portnum);
-	hostentptr = gethostbyname((char *)&scc_ptr->modem_cmd_str[0]);
-	printf("Connecting to %s, port:%d\n",
-		(char *)&scc_ptr->modem_cmd_str[0], scc_ptr->modem_out_portnum);
+	sa_in.sin_port = htons(remote_port);
+	while(*remote_ip_str == ' ') {
+		remote_ip_str++;		// Skip leading blanks
+	}
+	hostentptr = gethostbyname(remote_ip_str);
+	printf("Connecting to %s, port:%d\n", remote_ip_str, remote_port);
 	if(hostentptr == 0) {
 #ifdef _WIN32
 		fatal_printf("Lookup host %s failed\n",
@@ -199,8 +348,8 @@ scc_socket_open_outgoing(int port, double dcycs)
 		fatal_printf("Lookup host %s failed, herrno: %d\n",
 					&scc_ptr->modem_cmd_str[0], h_errno);
 #endif
-		close(sockfd);
-		scc_socket_close(port, 1, dcycs);
+		closesocket(sockfd);
+		scc_socket_close_extended(dfcyc, port, 0);
 		return;
 	}
 	memcpy(&sa_in.sin_addr.s_addr, hostentptr->h_addr,
@@ -211,139 +360,88 @@ scc_socket_open_outgoing(int port, double dcycs)
 	ret = connect(sockfd, (struct sockaddr *)&sa_in, sizeof(sa_in));
 	if(ret < 0) {
 		printf("connect ret: %d, errno: %d\n", ret, errno);
-		close(sockfd);
-		scc_socket_close(port, 1, dcycs);
+		closesocket(sockfd);
+		scc_socket_close_extended(dfcyc, port, 0);
 		return;
 	}
-	scc_socket_modem_connect(port, dcycs);
+	scc_socket_modem_connect(dfcyc, port);
 	scc_ptr->dcd = 1;		/* carrier on */
-	scc_ptr->socket_state = 1;	/* talk to socket */
+	scc_ptr->modem_state = 0;	/* talk to socket */
 	scc_ptr->socket_num_rings = 0;
 
-	printf("SCC port %d is now outgoing to %s\n", port,
-						&scc_ptr->modem_cmd_str[0]);
+	printf("SCC port %d is now outgoing to %s:%d\n", port, remote_ip_str,
+							remote_port);
 
 	scc_ptr->sockfd = sockfd;
-	scc_ptr->state = 1;		/* successful socket */
 
-	scc_socket_make_nonblock(port, dcycs);
+	scc_socket_make_nonblock(dfcyc, port);
 	scc_ptr->rdwrfd = scc_ptr->sockfd;
+#endif
 }
 
 void
-scc_socket_make_nonblock(int port, double dcycs)
+scc_socket_make_nonblock(dword64 dfcyc, int port)
 {
+#ifdef SCC_SOCKETS
 	Scc	*scc_ptr;
 	SOCKET	sockfd;
 	int	ret;
-#ifdef _WIN32
+# ifdef _WIN32
 	u_long	flags;
-#else
+# else
 	int	flags;
-#endif
+# endif
 
 	scc_ptr = &(g_scc[port]);
 	sockfd = scc_ptr->sockfd;
 
-#ifdef _WIN32
+# ifdef _WIN32
 	flags = 1;
 	ret = ioctlsocket(sockfd, FIONBIO, &flags);
 	if(ret != 0) {
 		printf("ioctlsocket ret: %d\n", ret);
 	}
-#else
+# else
 	flags = fcntl(sockfd, F_GETFL, 0);
 	if(flags == -1) {
 		printf("fcntl GETFL ret: %d, errno: %d\n", flags, errno);
-		scc_socket_close(port, 1, dcycs);
-		scc_ptr->socket_state = -1;
+		scc_socket_close_extended(dfcyc, port, 0);
 		return;
 	}
 	ret = fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
 	if(ret == -1) {
 		printf("fcntl SETFL ret: %d, errno: %d\n", ret, errno);
-		scc_socket_close(port, 1, dcycs);
-		scc_ptr->socket_state = -1;
+		scc_socket_close_extended(dfcyc, port, 0);
 		return;
 	}
+# endif
 #endif
 }
 
 void
-scc_socket_close(int port, int full_close, double dcycs)
-{
-	Scc	*scc_ptr;
-	int	rdwrfd;
-	SOCKET	sockfd;
-	int	i;
-
-	scc_ptr = &(g_scc[port]);
-
-	printf("In scc_socket_close, %d, %d, %f\n", port, full_close, dcycs);
-
-	rdwrfd = scc_ptr->rdwrfd;
-	if(rdwrfd >= 0) {
-		printf("socket_close: rdwrfd=%d, closing\n", rdwrfd);
-		close(rdwrfd);
-	}
-	sockfd = scc_ptr->sockfd;
-	if(sockfd != (SOCKET)-1) {
-		printf("socket_close: sockfd=%d, closing\n", sockfd);
-		close(sockfd);
-	}
-
-	scc_ptr->modem_cmd_len = 0;
-	scc_ptr->telnet_mode = 0;
-	scc_ptr->telnet_iac = 0;
-	for(i = 0; i < 2; i++) {
-		scc_ptr->telnet_local_mode[i] = 0;
-		scc_ptr->telnet_remote_mode[i] = 0;
-		scc_ptr->telnet_reqwill_mode[i] = 0;
-		scc_ptr->telnet_reqdo_mode[i] = 0;
-	}
-	scc_ptr->rdwrfd = -1;
-	scc_ptr->sockfd = -1;
-	scc_ptr->dcd = 0;
-	scc_ptr->socket_num_rings = 0;
-
-	if(!full_close) {
-		return;
-	}
-
-	scc_socket_modem_hangup(port, dcycs);
-
-	/* and go back to modem mode */
-	scc_ptr->socket_state = 0;
-	if(g_serial_modem[port]) {
-		scc_ptr->modem_dial_or_acc_mode = 0;
-	} else {
-		scc_ptr->modem_dial_or_acc_mode = 2;	/* always accept */
-	}
-}
-
-void
-scc_accept_socket(int port, double dcycs)
+scc_accept_socket(dword64 dfcyc, int port)
 {
 #ifdef SCC_SOCKETS
 	Scc	*scc_ptr;
-	int	flags;
-	int	num_rings;
-	int	rdwrfd;
-	int	ret;
+	SOCKET	rdwrfd;
+	socklen_t address_len;
+	int	flags, num_rings, ret;
 
 	scc_ptr = &(g_scc[port]);
 
-	if(scc_ptr->sockfd == (SOCKET)-1) {
-		printf("in accept_socket, call socket_open\n");
-		scc_socket_maybe_open_incoming(port, dcycs);
+	if(scc_ptr->sockfd == INVALID_SOCKET) {
+		// printf("in accept_socket, call socket_open\n");
+		scc_socket_open_incoming(dfcyc, port);
 	}
-	if(scc_ptr->sockfd == (SOCKET)-1) {
+	if(scc_ptr->sockfd == INVALID_SOCKET) {
 		return;		/* just give up */
 	}
-	if(scc_ptr->rdwrfd == -1) {
-		rdwrfd = accept(scc_ptr->sockfd, scc_ptr->host_handle,
-					(socklen_t *)&(scc_ptr->host_aux1));
-		if(rdwrfd < 0) {
+	if(scc_ptr->rdwrfd == INVALID_SOCKET) {
+		address_len = scc_ptr->sockaddr_size;
+		rdwrfd = accept(scc_ptr->sockfd, scc_ptr->sockaddr_ptr,
+								&address_len);
+		scc_ptr->sockaddr_size = (int)address_len;
+		if(rdwrfd == INVALID_SOCKET) {
 			return;
 		}
 
@@ -363,30 +461,36 @@ scc_accept_socket(int port, double dcycs)
 		}
 #endif
 		scc_ptr->rdwrfd = rdwrfd;
-		printf("Set port[%d].rdwrfd = %d\n", port, rdwrfd);
+		printf("Set port[%d].rdwrfd = %llx\n", port, (dword64)rdwrfd);
 
 		num_rings = 4;
 		if(scc_ptr->modem_s0_val > 0) {
 			num_rings = scc_ptr->modem_s0_val;
 		}
 		scc_ptr->socket_num_rings = num_rings;
-		scc_ptr->socket_last_ring_dcycs = 0;	/* do ring now*/
+		scc_ptr->socket_last_ring_dfcyc = 0;	/* do ring now*/
 
 		/* and send some telnet codes */
-		scc_ptr->telnet_reqwill_mode[0] = 0xa;	/* 3=GO_AH and 1=ECHO */
-		scc_ptr->telnet_reqdo_mode[0] = 0xa;	/* 3=GO_AH and 1=ECHO */
-#if 0
-		scc_ptr->telnet_reqdo_mode[1] = 0x4;	/* 34=LINEMODE */
-#endif
-		printf("Telnet reqwill and reqdo's initialized\n");
+		if(g_serial_modem_init_telnet) {
+			scc_ptr->telnet_reqwill_mode[0] = 0xa;
+			scc_ptr->telnet_reqdo_mode[0] = 0xa;
+				/* 3=GO_AH and 1=ECHO */
+			scc_ptr->telnet_reqdo_mode[1] = 0x4;	// 34=LINEMODE
+		}
+		printf("Telnet reqwill and reqdo's initialized: %08x_%08x,"
+				"%08x_%08x\n",
+				scc_ptr->telnet_reqwill_mode[1],
+				scc_ptr->telnet_reqwill_mode[0],
+				scc_ptr->telnet_reqdo_mode[1],
+				scc_ptr->telnet_reqdo_mode[0]);
 
-		scc_socket_modem_do_ring(port, dcycs);
+		scc_socket_modem_do_ring(dfcyc, port);
 	}
 #endif
 }
 
 void
-scc_socket_telnet_reqs(int port)
+scc_socket_telnet_reqs(dword64 dfcyc, int port)
 {
 	Scc	*scc_ptr;
 	word32	mask, willmask, domask;
@@ -398,43 +502,43 @@ scc_socket_telnet_reqs(int port)
 		mask = 1 << (i & 31);
 		willmask = scc_ptr->telnet_reqwill_mode[j];
 		if(willmask & mask) {
-			printf("Telnet reqwill %d\n", i);
-			scc_add_to_writebuf(port, 0xff);
-			scc_add_to_writebuf(port, 0xfb);	/* WILL */
-			scc_add_to_writebuf(port, i);
+			scc_printf("Telnet reqwill %d\n", i);
+			scc_add_to_writebuf(dfcyc, port, 0xff);
+			scc_add_to_writebuf(dfcyc, port, 0xfb);	/* WILL */
+			scc_add_to_writebuf(dfcyc, port, i);
 		}
 		domask = scc_ptr->telnet_reqdo_mode[j];
 		if(domask & mask) {
-			printf("Telnet reqdo %d\n", i);
-			scc_add_to_writebuf(port, 0xff);
-			scc_add_to_writebuf(port, 0xfd);	/* DO */
-			scc_add_to_writebuf(port, i);
+			scc_printf("Telnet reqdo %d\n", i);
+			scc_add_to_writebuf(dfcyc, port, 0xff);
+			scc_add_to_writebuf(dfcyc, port, 0xfd);	/* DO */
+			scc_add_to_writebuf(dfcyc, port, i);
 		}
 	}
 }
 
 void
-scc_socket_fill_readbuf(int port, int space_left, double dcycs)
+scc_socket_fill_readbuf(dword64 dfcyc, int port, int space_left)
 {
 #ifdef SCC_SOCKETS
 	byte	tmp_buf[256];
 	Scc	*scc_ptr;
-	int	rdwrfd;
+	SOCKET	rdwrfd;
 	int	ret;
 	int	i;
 
 	scc_ptr = &(g_scc[port]);
 
-	scc_accept_socket(port, dcycs);
-	scc_socket_modem_do_ring(port, dcycs);
+	scc_accept_socket(dfcyc, port);
+	scc_socket_modem_do_ring(dfcyc, port);
 
-	if(scc_ptr->socket_state == 0 && g_serial_modem[port]) {
+	if(scc_ptr->modem_state) {
 		/* Just get out, this is modem mode */
 		/*  The transmit function stuffs any bytes in receive buf */
 		return;
 	}
 	rdwrfd = scc_ptr->rdwrfd;
-	if(rdwrfd < 0) {
+	if(rdwrfd == INVALID_SOCKET) {
 		return;		/* just get out */
 	}
 
@@ -447,46 +551,36 @@ scc_socket_fill_readbuf(int port, int space_left, double dcycs)
 				/* Skip null chars */
 				continue;
 			}
-			scc_socket_recvd_char(port, tmp_buf[i], dcycs);
+			scc_socket_recvd_char(dfcyc, port, tmp_buf[i]);
 		}
 	} else if(ret == 0) {
 		/* assume socket close */
-		printf("recv got 0 from rdwrfd=%d, closing\n", rdwrfd);
-		scc_socket_close(port, 1, dcycs);
+		printf("recv got 0 from rdwrfd=%llx, closing\n",
+							(dword64)rdwrfd);
+		scc_socket_close_extended(dfcyc, port, 1);
 	}
 #endif
 }
 
-int g_scc_dbg_print_cnt = 50;
-
 void
-scc_socket_recvd_char(int port, int c, double dcycs)
+scc_socket_recvd_char(dword64 dfcyc, int port, int c)
 {
 	Scc	*scc_ptr;
-	word32	locmask, remmask, mask;
-	word32	reqwillmask, reqdomask;
-	int	telnet_mode, telnet_iac;
-	int	eff_c, cpos;
-	int	reply;
+	word32	locmask, remmask, mask, reqwillmask, reqdomask;
+	int	telnet_mode, telnet_iac, eff_c, cpos, reply;
 
 	scc_ptr = &(g_scc[port]);
 
-	scc_socket_maybe_open_incoming(port, dcycs);
-
 	telnet_mode = scc_ptr->telnet_mode;
 	telnet_iac = scc_ptr->telnet_iac;
-	if(c >= 0xf0 || telnet_mode || telnet_iac) {
-		g_scc_dbg_print_cnt = 50;
-	}
-#if 0
-	if(g_scc_dbg_print_cnt) {
-		printf("Recv: %02x mode: %d\n", c, telnet_mode);
-		g_scc_dbg_print_cnt--;
-	}
-#endif
 
 	eff_c = c;
-	if(telnet_iac == 0) {
+	if(scc_ptr->cur_state == 2) {
+		// Outgoing only connection, support 8-bit transfers with
+		//  no telnet command support
+		telnet_mode = 0;
+		telnet_iac = 0;
+	} else if(telnet_iac == 0) {
 		if(c == 0xff) {
 			scc_ptr->telnet_iac = 0xff;
 			return;			/* and just get out */
@@ -518,7 +612,7 @@ scc_socket_recvd_char(int port, int c, double dcycs)
 			break;
 		default:
 			if(eff_c < 0x100) {
-				scc_add_to_readbuf(port, c, dcycs);
+				scc_add_to_readbuf(dfcyc, port, c);
 			}
 			break;
 		}
@@ -528,24 +622,24 @@ scc_socket_recvd_char(int port, int c, double dcycs)
 			/* SE, the end */
 			telnet_mode = 0;
 		}
-		printf("LINEMODE SLC octet 0: %02x\n", c);
+		scc_printf("LINEMODE SLC octet 0: %02x\n", c);
 		telnet_mode = 4;
 		break;
 	case 4: /* LINEMODE SB SLC, octet 1 */
-		printf("LINEMODE SLC octet 1: %02x\n", c);
+		scc_printf("LINEMODE SLC octet 1: %02x\n", c);
 		telnet_mode = 5;
 		if(eff_c == 0x1f0) {
 			/* SE, the end */
-			printf("Got SE at octet 1...\n");
+			scc_printf("Got SE at octet 1...\n");
 			telnet_mode = 0;
 		}
 		break;
 	case 5: /* LINEMODE SB SLC, octet 2 */
-		printf("LINEMODE SLC octet 2: %02x\n", c);
+		scc_printf("LINEMODE SLC octet 2: %02x\n", c);
 		telnet_mode = 3;
 		if(eff_c == 0x1f0) {
 			/* SE, the end */
-			printf("Got SE at octet 2...\n");
+			printf("Got Telnet SE at octet 2...\n");
 			telnet_mode = 0;
 		}
 		break;
@@ -580,9 +674,9 @@ scc_socket_recvd_char(int port, int c, double dcycs)
 		if(locmask && (reqwillmask == 0)) {
 			/* it's a mode change */
 			/* always OK to turn off a mode that we had on */
-			scc_add_to_writebuf(port, 0xff);
-			scc_add_to_writebuf(port, 0xfc);	/* WON'T */
-			scc_add_to_writebuf(port, c);
+			scc_add_to_writebuf(dfcyc, port, 0xff);
+			scc_add_to_writebuf(dfcyc, port, 0xfc);	/* WON'T */
+			scc_add_to_writebuf(dfcyc, port, c);
 		}
 		scc_ptr->telnet_local_mode[cpos] &= ~mask;
 		scc_ptr->telnet_reqwill_mode[cpos] &= ~mask;
@@ -596,9 +690,9 @@ scc_socket_recvd_char(int port, int c, double dcycs)
 			if(c == 0x03 || c == 0x01) {
 				reply = 0xfb;	/* Ack with WILL */
 			}
-			scc_add_to_writebuf(port, 0xff);
-			scc_add_to_writebuf(port, reply);
-			scc_add_to_writebuf(port, c);
+			scc_add_to_writebuf(dfcyc, port, 0xff);
+			scc_add_to_writebuf(dfcyc, port, reply);
+			scc_add_to_writebuf(dfcyc, port, c);
 		}
 		if(reqwillmask || (reply == 0xfb)) {
 			scc_ptr->telnet_local_mode[cpos] |= mask;
@@ -609,9 +703,9 @@ scc_socket_recvd_char(int port, int c, double dcycs)
 	case 0xfc:	/* previous char was "WON'T" */
 		if(remmask && (reqdomask == 0)) {
 			/* it's a mode change, ack with DON'T */
-			scc_add_to_writebuf(port, 0xff);
-			scc_add_to_writebuf(port, 0xfe);	/* DON'T */
-			scc_add_to_writebuf(port, c);
+			scc_add_to_writebuf(dfcyc, port, 0xff);
+			scc_add_to_writebuf(dfcyc, port, 0xfe);	/* DON'T */
+			scc_add_to_writebuf(dfcyc, port, c);
 		}
 		scc_ptr->telnet_remote_mode[cpos] &= ~mask;
 		scc_ptr->telnet_reqdo_mode[cpos] &= ~mask;
@@ -624,9 +718,9 @@ scc_socket_recvd_char(int port, int c, double dcycs)
 			if(c == 0x03 || c == 0x01) {
 				reply = 0xfd;	/* Ack with DO */
 			}
-			scc_add_to_writebuf(port, 0xff);
-			scc_add_to_writebuf(port, reply);
-			scc_add_to_writebuf(port, c);
+			scc_add_to_writebuf(dfcyc, port, 0xff);
+			scc_add_to_writebuf(dfcyc, port, reply);
+			scc_add_to_writebuf(dfcyc, port, c);
 		}
 		if(reqdomask || (reply == 0xfd)) {
 			scc_ptr->telnet_remote_mode[cpos] |= mask;
@@ -642,34 +736,30 @@ scc_socket_recvd_char(int port, int c, double dcycs)
 }
 
 void
-scc_socket_empty_writebuf(int port, double dcycs)
+scc_socket_empty_writebuf(dword64 dfcyc, int port)
 {
 #ifdef SCC_SOCKETS
 # ifndef _WIN32
 	struct sigaction newact, oldact;
 # endif
 	Scc	*scc_ptr;
-	double	diff_dcycs;
-	int	plus_mode;
-	int	rdptr;
-	int	wrptr;
-	int	rdwrfd;
-	int	done;
-	int	ret;
-	int	len;
-	int	c;
+	dword64	diff_dusec;
+	SOCKET	rdwrfd;
+	int	plus_mode, plus_char, rdptr, wrptr, done, ret, len, c;
 	int	i;
+
+	scc_socket_maybe_open(dfcyc, port, 0);
 
 	scc_ptr = &(g_scc[port]);
 
 	/* See if +++ done and we should go to command mode */
-	diff_dcycs = dcycs - scc_ptr->out_char_dcycs;
-	if((diff_dcycs > 900.0*1000) && (scc_ptr->modem_plus_mode == 3) &&
-				(scc_ptr->socket_state >= 1) &&
-				(g_serial_modem[port] != 0)) {
-		scc_ptr->socket_state = 0;	/* go modem mode, stay connect*/
+	diff_dusec = (dfcyc - scc_ptr->out_char_dfcyc) >> 16;
+	if((diff_dusec > 900LL*1000) && (scc_ptr->modem_plus_mode == 3) &&
+				(scc_ptr->modem_state == 0) &&
+				(scc_ptr->cur_state == 1)) {
+		scc_ptr->modem_state = 1;	/* go modem mode, stay connect*/
 		scc_ptr->modem_plus_mode = 0;
-		scc_socket_send_modem_code(port, 0, dcycs);
+		scc_socket_send_modem_code(dfcyc, port, 0);	// "OK"
 	}
 
 	/* Try writing some bytes */
@@ -689,38 +779,41 @@ scc_socket_empty_writebuf(int port, double dcycs)
 		if(len > 32) {
 			len = 32;
 		}
+		//printf("Writing data, %d bytes, modem_state:%d\n", len,
+		//					scc_ptr->modem_state);
 		if(len <= 0) {
 			done = 1;
 			break;
 		}
+		scc_socket_maybe_open(dfcyc, port, 1);
 
-		if(scc_ptr->socket_state < 1 && g_serial_modem[port]) {
+		if(scc_ptr->modem_state) {
 			len = 1;
-			scc_socket_modem_write(port, scc_ptr->out_buf[rdptr],
-								dcycs);
+			scc_socket_modem_write(dfcyc, port,
+						scc_ptr->out_buf[rdptr]);
+			scc_ptr->write_called_this_vbl = 0;
 			ret = 1;
 		} else {
-			if(rdwrfd == -1) {
-				if(g_serial_modem[port]) {
-					printf("socket_state: %d, ser_mod: %d, "
-						"rdwrfd: %d\n",
-						scc_ptr->socket_state,
-						g_serial_modem[port], rdwrfd);
-				}
-				scc_ptr->socket_state = 0;
-				scc_socket_maybe_open_incoming(port, dcycs);
+			if(rdwrfd == INVALID_SOCKET) {
 				return;
 			}
+			plus_char = scc_ptr->modem_s2_val;
+			if((plus_char == 0) || (plus_char >= 128)) {
+				plus_char = 0xfff;		// Invalid
+				scc_ptr->modem_plus_mode = 0;
+			}
+			// Look for '+++' within .8 seconds
 			for(i = 0; i < len; i++) {
 				c = scc_ptr->out_buf[rdptr + i];
 				plus_mode = scc_ptr->modem_plus_mode;
-				diff_dcycs = dcycs - scc_ptr->out_char_dcycs;
-				if(c == '+' && plus_mode == 0) {
-					if(diff_dcycs > 500*1000) {
+				diff_dusec =
+					(dfcyc - scc_ptr->out_char_dfcyc) >> 16;
+				if(c == plus_char && plus_mode == 0) {
+					if(diff_dusec > 500LL*1000) {
 						scc_ptr->modem_plus_mode = 1;
 					}
-				} else if(c == '+') {
-					if(diff_dcycs < 800.0*1000) {
+				} else if(c == plus_char) {
+					if(diff_dusec < 800LL*1000) {
 						plus_mode++;
 						scc_ptr->modem_plus_mode =
 								plus_mode;
@@ -728,30 +821,29 @@ scc_socket_empty_writebuf(int port, double dcycs)
 				} else {
 					scc_ptr->modem_plus_mode = 0;
 				}
-				scc_ptr->out_char_dcycs = dcycs;
+				scc_ptr->out_char_dfcyc = dfcyc;
 			}
-
-# ifdef _WIN32
-			ret = (int)send(rdwrfd, &(scc_ptr->out_buf[rdptr]),
-									len, 0);
-# else
-			/* ignore SIGPIPE around writes to the socket, so we */
-			/*  can catch a closed socket and prepare to accept */
-			/*  a new connection.  Otherwise, SIGPIPE kills KEGS */
+# ifndef _WIN32
+			// ignore SIGPIPE around writes to the socket, so we
+			//  can catch a closed socket and prepare to accept
+			//  a new connection.  Otherwise, SIGPIPE kills KEGS
 			sigemptyset(&newact.sa_mask);
 			newact.sa_handler = SIG_IGN;
 			newact.sa_flags = 0;
 			sigaction(SIGPIPE, &newact, &oldact);
+# endif
 
 			ret = (int)send(rdwrfd, &(scc_ptr->out_buf[rdptr]),
 									len, 0);
 
+# ifndef _WIN32
 			sigaction(SIGPIPE, &oldact, 0);
 			/* restore previous SIGPIPE behavior */
-# endif	/* WIN32 */
+# endif
 
 #if 0
-			printf("sock output: %02x\n", scc_ptr->out_buf[rdptr]);
+			printf("sock output: %02x, len:%d\n",
+					scc_ptr->out_buf[rdptr], len);
 #endif
 
 		}
@@ -762,7 +854,7 @@ scc_socket_empty_writebuf(int port, double dcycs)
 		} else if(ret < 0) {
 			/* assume socket is dead */
 			printf("socket write failed, resuming modem mode\n");
-			scc_socket_close(port, 1, dcycs);
+			scc_socket_close_extended(dfcyc, port, 1);
 			done = 1;
 			break;
 		} else {
@@ -777,7 +869,7 @@ scc_socket_empty_writebuf(int port, double dcycs)
 }
 
 void
-scc_socket_modem_write(int port, int c, double dcycs)
+scc_socket_modem_write(dword64 dfcyc, int port, int c)
 {
 	Scc	*scc_ptr;
 	char	*str;
@@ -786,31 +878,30 @@ scc_socket_modem_write(int port, int c, double dcycs)
 
 	scc_ptr = &(g_scc[port]);
 
-	if(scc_ptr->sockfd == (SOCKET)-1) {
-		scc_ptr->socket_state = 0;
-		scc_socket_maybe_open_incoming(port, dcycs);
+	if(scc_ptr->sockfd == INVALID_SOCKET) {
+		scc_socket_open_incoming(dfcyc, port);
 	}
 
 	modem_mode = scc_ptr->modem_mode;
 	str = (char *)&(scc_ptr->modem_cmd_str[0]);
 
-#if 0
-	printf("M: %02x\n", c);
-#endif
 	do_echo = ((modem_mode & SCCMODEM_NOECHO) == 0);
 	len = scc_ptr->modem_cmd_len;
 	got_at = 0;
+#if 0
+	printf("T:%016llx M[%d][%d]: %02x\n", dfcyc, port, len, c);
+#endif
 	if(len >= 2 && str[0] == 'a' && str[1] == 't') {
 		/* we've got an 'at', do not back up past it */
 		got_at = 1;
 	}
 	if(c == 0x0d) {
 		if(do_echo) {
-			scc_add_to_readbuf(port, c, dcycs);	/* echo cr */
-			scc_add_to_readbuf(port, 0x0a, dcycs);	/* echo lf */
+			scc_add_to_readbuf(dfcyc, port, c);	/* echo cr */
+			scc_add_to_readbuf(dfcyc, port, 0x0a);	/* echo lf */
 		}
 		do_echo = 0;	/* already did the echo */
-		scc_socket_do_cmd_str(port, dcycs);
+		scc_socket_do_cmd_str(dfcyc, port);
 		scc_ptr->modem_cmd_len = 0;
 		len = 0;
 		str[0] = 0;
@@ -838,21 +929,16 @@ scc_socket_modem_write(int port, int c, double dcycs)
 	}
 	scc_ptr->modem_cmd_len = len;
 	if(do_echo) {
-		scc_add_to_readbuf(port, c, dcycs);	/* echo */
+		scc_add_to_readbuf(dfcyc, port, c);	/* echo */
 	}
 }
 
 void
-scc_socket_do_cmd_str(int port, double dcycs)
+scc_socket_do_cmd_str(dword64 dfcyc, int port)
 {
 	Scc	*scc_ptr;
 	char	*str;
-	int	pos, len;
-	int	ret_val;
-	int	reg, reg_val;
-	int	was_amp;
-	int	out_port;
-	int	c;
+	int	pos, len, ret_val, reg, reg_val, was_amp, out_port, c;
 	int	i;
 
 	scc_ptr = &(g_scc[port]);
@@ -875,7 +961,8 @@ scc_socket_do_cmd_str(int port, double dcycs)
 	}
 
 	/* Some AT command received--make sure socket 6501/6502 is open */
-	printf("Some AT command received, sockfd=%d\n", scc_ptr->sockfd);
+	printf("Some AT command received, sockfd=%llx\n",
+						(dword64)scc_ptr->sockfd);
 
 	pos = 2 - 1;
 	ret_val = 0;		/* "OK" */
@@ -914,23 +1001,27 @@ scc_socket_do_cmd_str(int port, double dcycs)
 			break;
 		case 'o':	/* ato = go online */
 			printf("ato\n");
-			if(scc_ptr->dcd && (scc_ptr->rdwrfd != -1) &&
-						(scc_ptr->socket_state == 0)) {
+			if(scc_ptr->dcd && scc_ptr->modem_state &&
+					(scc_ptr->rdwrfd != INVALID_SOCKET)) {
 				printf("Going back online\n");
-				scc_ptr->socket_state = 1;
-				scc_socket_modem_connect(port, dcycs);
+				scc_socket_modem_connect(dfcyc, port);
+				scc_ptr->modem_state = 0;
+						// talk to socket
 				ret_val = -1;
 			}
 			break;
 		case 'h':	/* ath = hang up */
 			printf("ath, hanging up\n");
-			scc_socket_close(port, (scc_ptr->rdwrfd != -1), dcycs);
-			/* scc_socket_maybe_open_incoming(port, dcycs); */
+			scc_socket_close(port);
+			if(scc_ptr->rdwrfd != INVALID_SOCKET) {
+				scc_socket_close_extended(dfcyc, port, 0);
+			}
+			/* scc_socket_maybe_open_incoming(dfcyc, port); */
 							/* reopen listen */
 			break;
 		case 'a':	/* ata */
 			printf("Doing ATA\n");
-			scc_socket_do_answer(port, dcycs);
+			scc_socket_do_answer(dfcyc, port);
 			ret_val = -1;
 			break;
 		case 'd':	/* atd */
@@ -967,8 +1058,9 @@ scc_socket_do_cmd_str(int port, double dcycs)
 					pos++;
 				}
 			}
-			scc_ptr->modem_dial_or_acc_mode = 1;
-			scc_socket_open_outgoing(port, dcycs);
+			scc_socket_open_outgoing(dfcyc, port,
+				(char *)&scc_ptr->modem_cmd_str[0],
+				scc_ptr->modem_out_portnum);
 			ret_val = -1;
 			pos = len;	/* always eat rest of the line */
 			break;
@@ -986,7 +1078,7 @@ scc_socket_do_cmd_str(int port, double dcycs)
 			if(c == '?') {
 				/* display S-register */
 				if(reg == 0) {
-					scc_add_to_readbufv(port, dcycs,
+					scc_add_to_readbufv(dfcyc, port,
 						"S0=%d\n",
 						scc_ptr->modem_s0_val);
 				}
@@ -1008,6 +1100,9 @@ scc_socket_do_cmd_str(int port, double dcycs)
 			printf("ats%d = %d\n", reg, reg_val);
 			if(reg == 0) {
 				scc_ptr->modem_s0_val = reg_val;
+			}
+			if(reg == 2) {
+				scc_ptr->modem_s2_val = reg_val;
 			}
 			pos--;
 			break;
@@ -1032,12 +1127,12 @@ scc_socket_do_cmd_str(int port, double dcycs)
 	}
 
 	if(ret_val >= 0) {
-		scc_socket_send_modem_code(port, ret_val, dcycs);
+		scc_socket_send_modem_code(dfcyc, port, ret_val);
 	}
 }
 
 void
-scc_socket_send_modem_code(int port, int code, double dcycs)
+scc_socket_send_modem_code(dword64 dfcyc, int port, int code)
 {
 	Scc	*scc_ptr;
 	char	*str;
@@ -1052,10 +1147,15 @@ scc_socket_send_modem_code(int port, int code, double dcycs)
 	case 3: str = "NO CARRIER"; break;
 	case 4: str = "ERROR"; break;
 	case 5: str = "CONNECT 1200"; break;
-	case 13: str = "CONNECT 9600"; break;
-	case 16: str = "CONNECT 19200"; break;
-	case 25: str = "CONNECT 14400"; break;
-	case 85: str = "CONNECT 19200"; break;
+	case 10: str = "CONNECT 2400"; break;
+	case 12: str = "CONNECT 9600"; break;	// Generic AT docs/Warp6 BBS
+	case 13: str = "CONNECT 9600"; break;	// US Robotics Sportster/HST
+	case 14: str = "CONNECT 19200"; break;	// Warp6 BBS
+	case 16: str = "CONNECT 19200"; break;	// Generic AT docs
+	case 25: str = "CONNECT 14400"; break;	// US Robotics Sportster
+	case 85: str = "CONNECT 19200"; break;	// US Robotics Sportster
+	case 18: str = "CONNECT 57600"; break;	// Generic AT docs/Warp6 BBS
+	case 28: str = "CONNECT 38400"; break;	// Warp6 BBS/Hayes
 	default:
 		str = "ERROR";
 	}
@@ -1065,82 +1165,75 @@ scc_socket_send_modem_code(int port, int code, double dcycs)
 	modem_mode = scc_ptr->modem_mode;
 	if(modem_mode & SCCMODEM_NOVERBOSE) {
 		/* just the number */
-		scc_add_to_readbufv(port, dcycs, "%d", code);
-		scc_add_to_readbuf(port, 0x0d, dcycs);
+		scc_add_to_readbufv(dfcyc, port, "%d", code);
+		scc_add_to_readbuf(dfcyc, port, 0x0d);
 	} else {
-		scc_add_to_readbufv(port, dcycs, "%s\n", str);
+		scc_add_to_readbufv(dfcyc, port, "%s\n", str);
 	}
 }
 
 void
-scc_socket_modem_hangup(int port, double dcycs)
+scc_socket_modem_connect(dword64 dfcyc, int port)
 {
-	scc_socket_send_modem_code(port, 3, dcycs);
+	// Send code telling Term program the connect speed
+	if(g_scc[port].cur_state == 1) {		// Virtual modem
+		scc_socket_send_modem_code(dfcyc, port,
+			g_serial_modem_response_code);	/*28=38400*/
+	}
 }
 
 void
-scc_socket_modem_connect(int port, double dcycs)
-{
-	/* decide which code to send.  Default to 1 if needed */
-	scc_socket_send_modem_code(port, 13, dcycs);	/*13=9600*/
-}
-
-void
-scc_socket_modem_do_ring(int port, double dcycs)
+scc_socket_modem_do_ring(dword64 dfcyc, int port)
 {
 	Scc	*scc_ptr;
-	double	diff_dcycs;
+	dword64	diff_dusecs;
 	int	num_rings;
 
 	scc_ptr = &(g_scc[port]);
 	num_rings = scc_ptr->socket_num_rings;
-	if(num_rings > 0 && scc_ptr->socket_state == 0) {
+	if((num_rings > 0) && scc_ptr->modem_state) {
 		num_rings--;
-		diff_dcycs = dcycs - scc_ptr->socket_last_ring_dcycs;
-		if(diff_dcycs < 2.0*1000*1000 && g_serial_modem[port]) {
+		diff_dusecs = (dfcyc - scc_ptr->socket_last_ring_dfcyc) >> 16;
+		if(diff_dusecs < 2LL*1000*1000) {
 			return;		/* nothing more to do */
 		}
-		printf("In modem_do_ring, ringing at %f\n", dcycs);
-		if(g_serial_modem[port]) {
-			scc_socket_send_modem_code(port, 2, dcycs); /* RING */
-		} else {
-			num_rings = 0;
-		}
+
 		scc_ptr->socket_num_rings = num_rings;
-		scc_ptr->socket_last_ring_dcycs = dcycs;
+		scc_ptr->socket_last_ring_dfcyc = dfcyc;
 		if(num_rings <= 0) {
 			/* decide on answering */
-			if(scc_ptr->modem_s0_val || (g_serial_modem[port]==0)) {
-				scc_socket_do_answer(port, dcycs);
+			if(scc_ptr->modem_s0_val) {
+				scc_socket_do_answer(dfcyc, port);
 			} else {
 				printf("No answer, closing socket\n");
-				scc_socket_close(port, 0, dcycs);
+				scc_socket_close(port);
 			}
+		} else {
+			scc_socket_send_modem_code(dfcyc, port, 2); /* RING */
 		}
 	}
 }
 
 void
-scc_socket_do_answer(int port, double dcycs)
+scc_socket_do_answer(dword64 dfcyc, int port)
 {
 	Scc	*scc_ptr;
 
 	scc_ptr = &(g_scc[port]);
-	scc_ptr->modem_dial_or_acc_mode = 2;
-	scc_accept_socket(port, dcycs);
-	if(scc_ptr->rdwrfd == -1) {
+	scc_accept_socket(dfcyc, port);
+	if(scc_ptr->rdwrfd == INVALID_SOCKET) {
 		printf("Answer when rdwrfd=-1, closing\n");
-		scc_socket_close(port, 1, dcycs);
+		scc_socket_close_extended(dfcyc, port, 0);
 		/* send NO CARRIER message */
 	} else {
-		scc_ptr->socket_state = 1;
-		scc_socket_telnet_reqs(port);
-		printf("Send telnet reqs, rdwrfd=%d\n", scc_ptr->rdwrfd);
-		if(g_serial_modem[port]) {
-			scc_socket_modem_connect(port, dcycs);
+		scc_socket_telnet_reqs(dfcyc, port);
+		printf("Send telnet reqs\n");
+		if(scc_ptr->modem_state) {
+			scc_socket_modem_connect(dfcyc, port);
 		}
-		scc_ptr->dcd = 1;		/* carrier on */
-		scc_ptr->socket_state = 1; /* talk to socket */
+		scc_ptr->modem_state = 0;		// Talk to socket
+		scc_ptr->dcd = 1;			// carrier on
 		scc_ptr->socket_num_rings = 0;
 	}
 }
+

@@ -1,14 +1,14 @@
 
-KEGS: Kent's Emulated GS version 1.16
+KEGS: Kent's Emulated GS version 1.34
 http://kegs.sourceforge.net/
 
 What is this?
 -------------
 
-KEGS is an Apple IIgs emulator for Mac OS X and Linux.
-The Apple IIgs was the most powerful computer in the Apple II line.
-It first was sold in 1986.  An Apple IIgs has the capability to run almost all
-Apple II, Apple IIe, and Apple IIc programs.
+KEGS is an Apple IIgs emulator for Mac OS X, Linux, and Windows.
+The Apple IIgs was first sold in 1986 and was the most powerful computer in
+the Apple II line.  An Apple IIgs has the capability to run almost all
+Apple II, Apple II+, Apple IIe, and Apple IIc programs.
 
 KEGS supports all Apple IIgs graphics modes (which include all Apple //e
 modes), plus plays all Apple IIgs sounds accurately.  It supports
@@ -20,6 +20,38 @@ with KEGS since they are not freely distributable.  KEGS is a little
 user-hostile now, so if something doesn't work, let me know what went
 wrong, and I'll try to help you out.  See my email address at the end of
 this file.
+
+KEGS QuickStart:
+---------------
+
+Run the KEGSMAC executable (see README.mac.txt on how to get around Mac
+security restrictions), or kegswin.exe on Windows 10 or later, or xkegs on
+Linux.
+
+You must download and place a ROM file in the directory you run KEGS from,
+or in your $HOME directory.  GS ROM version 01 should be named ROM.01, and
+GS ROM version 03 should be named ROM.03.  See Getting ROMs below.
+
+Once KEGS is running, if it cannot find a ROM file, it will ask you to
+select one using an Apple-II style directory selection screen.  When done,
+Press F4 to start.
+
+Press F4 while KEGS is running to select Disk images.  The default config.kegs
+will boot Nucleus in s7d1.  If you unmount it (F4->Disk Configuration, go
+down to s7d1, press E to eject, then F4, then do Ctrl-F1-F12 to reset and
+reboot, then the XMAS demo will start).
+
+Apple IIgs programs need Command and Option keys, and these sometimes are
+used by windowing systems on Linux and Windows.  F1 is always Command (or
+Open-Apple) and F2 is always Option (or closed-Apple), and F3 is an alias
+for ESC.  So entering the IIgs control panel can be done with Ctrl-F1-F3.
+
+Press F5 to toggle the status display.  Press F6 to toggle speed between
+1MHz, 2.8MHz, 8MHz, and Unlimited.  You can only see the current speed with
+the status lines enabled.
+
+You can resize the KEGS window.
+
 
 KEGS features:
 -------------
@@ -71,9 +103,6 @@ Included files:
 	KEGSMAC			- the Mac OS X executable
 	kegswin.exe		- the Windows executable
 	config.kegs		- disk image configuration info
-	to_pro			- Hard-to-use ProDOS volume creator
-	partls			- Lists partitions on Apple-partitioned hard
-				   drives or CD-ROMs
 	src/			- All the source code, with a Makefile
 
 You need to provide:
@@ -100,16 +129,15 @@ Running KEGS:
 ------------
 
 The distribution comes with the full source code for all platforms in
-the src/ directory, the Linux executable as xkegs, and the Mac OS X
-executable as KEGSMAC.app.
+the src/ directory, the Linux executable as xkegs, the Windows executable
+is kegswin.exe, and the Mac OS X executable as KEGSMAC.app.
 
 See the README.compile.txt file for more info about compiling for Linux.
 
-On all platforms except the Mac, you must start KEGS from a terminal
-window.  KEGS will open a new window and use the window you started it from
-as a "debug" window.  
+On Linux, you must start KEGS from a terminal window.  You can double-click
+on KEGSMAC.app or kegswin.exe to run those executables.
 
-On a MAC, you need to place the "config.kegs" file someplace where KEGS
+You need to place the "config.kegs" file someplace where KEGS
 can find it.  The simplest place is in your home directory, so copy it there
 with the Finder (or using the Terminal).  You can also make the directory
 Library/KEGS from your home directory, and then place config.kegs there
@@ -120,11 +148,14 @@ Start kegs by Double-clicking the KEGSMAC icon on a MAC, or by running
 the executable (kegswin on Windows, and kegs on Linux).  KEGSMAC can
 be run by the Terminal window on a Mac as well (which enables access to
 more debug information) by typing: "./KEGSMAC.app/Contents/MacOS/KEGSMAC".
+There may be permissions/security issues on a Mac, see README.mac.txt for
+details. 
 
 Assuming all goes well, KEGS will then boot up but probably not find any
 disk images.  See below for how to tell KEGS what disk images to use.
 Tip: Hitting "F8" locks the mouse in the window (and hides the host cursor)
 until you hit "F8" again.
+
 
 Configuration Panel:
 -------------------
@@ -193,7 +224,7 @@ access it)!
 
 If you do not have any disk mounted in s7d1, KEGS will jump into the monitor.
 To boot slot 6 (or slot 5), use the Apple IIgs Control Panel by pressing
-Ctrl-Command-ESC.
+Ctrl-Command-ESC (Ctrl-F1-F3 on Windows, for example).
 
 Support for 5.25" Woz nibblized images is limited to using provided images--
 KEGS cannot create new images currently.
@@ -212,24 +243,30 @@ Key summary:
 
 F1:	Alias of Command
 F2:	Alias of Option
-F3:	Alias of ESC for OS/2 compatibility.
+F3:	Alias of ESC for Windows compatibility.
 F4:	Configuration Panel
 F5:	Toggle status lines on/off
-F6:	Toggle through the 4 speeds: Unlimited, 1MHz, 2.8MHz, 8.0MHz
+F6:	Toggle through the 4 speeds: Unlimited, 1MHz, 2.8MHz, 8.0MHz (ZipGS)
 Shift-F6: Enter KEGS debugger
 F7:	Toggle debugger window
 Shift-F7: Toggle fast_disk_emul on/off
 F8:	Toggle pointer hiding on/off.
 F9:	Invert the sense of the joystick.
 Shift-F9: Swap x and y joystick/paddle axes.
+Ctrl-F9: Copy Text screen to host system clipboard
 F12:	Alias of Pause/Break which is treated as Reset
 
 F2, Alt_R, Meta_r, Menu, Print, Mode_switch, Option:   Option key
 F1, Alt_L, Meta_L, Cancel, Scroll_lock, Command:       Command key
 Num_Lock:		Keypad "Clear".
-F12, Pause, Break:	Reset
+F12, Pause, Break:	Reset.  Must press Ctrl to get Apple IIgs to reset
 
 "Home": Alias for "=" on the keypad (since my Unix keyboard doesn't have an =).
+
+Alt keys don't work well for Command and Option on Windows.  They only
+can be detected when another key is pressed.  So Alt_L-Q will be detected
+as Command-Q.  But just pressing Alt_L alone will not do anything.
+
 
 Using KEGS:
 ----------
@@ -305,12 +342,20 @@ title bar.  To exit full screen mode, move the mouse to the top of the screen,
 and the title bar will reappear, and you can click the green maximize button
 to shrink the window down.
 
+Resizing the KEGS window:
+------------------------
+
 All versions of KEGS allow the window to be resized, so you can make the
 window take up nearly the full screen without being "full screen" mode.
+KEGS will save the window position and size when it updates config.kegs,
+but currently doesn't automatically update config.kegs.  So if you resize
+the window, and then do something which changes config.kegs (inserting or
+ejecting disks always immediately update config.kegs, or selecting the
+F4 menu option "Save changes to config.kegs" will update config.kegs).
 
 
 Joystick Emulation (Mouse, Keypad, or real native joystick):
-------------------
+-----------------------------------------------------------
 
 The default joystick is the mouse position.  Upper left is 0,0.  Lower right
 is 255,255.  Press Shift-F9 to swap the X and Y axes.  Press F9 to reverse
@@ -450,81 +495,76 @@ X-Windows/Linux options
 	by as much as a factor of 10!  By default, -noshm causes an
 	effective -skip of 3 which is 15 fps.  You can override this
 	default by specifying a -skip explicitly.
+-cfg:  Next argument gives the path and name of the config.kegs file to use
+-rom=path_to_rom or -rom path_to_rom: Selects the ROM file, either a //e
+	ROM file, or a IIgs ROM 01 or ROM 03 file.
+-s5d1=path_to_image or -s5d1 path_to_image mounts the selected image in
+	Slot 5 Drive 1 (800KB disk).  Can use -s5d1 through -s6d2, as
+	well as -s7d1 through -s7d12.
 
 
 Apple IIgs Control Panel:
 ------------------------
 
 You can get to the Apple IIgs control panel (unless some application
-has locked it out) using Ctrl-Command-ESC.
+has locked it out) using Ctrl-Command-ESC.  On Windows, Command and ESC can
+be tricky to enter (Windows grabs them for itself), so Ctrl-F1-F3 is the
+same as Ctrl-Command-ESC.
 
-Important things to do here: Change the speed to 1MHz (for Apple II
-compatibility), change the boot device (so you can boot s6d1 directly),
-and change Slot 4 to Your Card to enable Mockingboard.
+Important things you can do here: Change the speed to 1MHz (for Apple II
+compatibility) (or just F6 to change the speed to 1MHz), change the boot
+device (so you can boot s6d1 directly), and change Slot 4 to Your Card to
+enable Mockingboard.
 
 
-How to use "to_pro":
--------------------
+Moving data into and out of KEGS
+--------------------------------
 
-This lame utility serves two purposes:  It "formats" large disk images,
-and lets you move files from Unix into the simulator.  It does this
-by taking the files you provide, and putting them onto Unix file called
-"POOF1" that is an image in ProDOS format.
+Use the Dynapro image support to mount a folder on your host machine as
+a ProDOS volume for ProDOS 8 or GS/OS.  Then use GS/OS (or any other program)
+to move files to emulated volumes, or just keep using Dynapro.  See
+README.dynapro.txt for more details.
 
-So, if you have a wolfdemo.bxy file from an FTP site, you can get it
-into the emulator by:
+From the debugger (press F7 to open the Debugger window), you can load and
+save any memory address to a Unix host file.  To save the hires page 1
+screen, use:
 
-to_pro -800 wolfdemo.bxy
+2000.3fffus hgr1
 
-which creates an 800K Unix file called "POOF1".  POOF1 is now an
-image that can be loaded into KEGS, and when you catalog it, it will
-have wolfdemo.bxy on it.
+Saves from $2000 through $3fff to the file "hgr1".  You can also load memory
+from a file using:
 
-To create a 4MB image:
+300ul helper
 
-to_pro -4096 wolfdemo.bxy
+Loads the contents of the file "helper" at $300.
 
-which puts wolfdemo.bxy on a much larger image.
 
-I don't know what happens if the file, wolfdemo.bxy, is bigger than
-the image...it probably crashes.
+Using the VOC
+-------------
 
-Even if you want to format a "blank" image, you have to put something in it.
-Like:
+KEGS has limited support for the Apple Video Overlay Card (VOC).  The VOC
+supports a special 640x400 interlaced SHR video mode which is what KEGS also
+supports.  To turn on this mode, you need to do:
 
-echo "This is a lame utility" > foo
-to_pro -16384 foo
+Enable VOC (Press F4, select "Video setting"", then select
+"Enable VOC = Enabled")
 
-...creates a 16MB POOF1 with the file foo on it.  Just delete foo
-from within KEGS.
+The following write done manually will enable the VOC:
 
-See?  I told you it was a lame utility!
+CALL -151
+c029:c1		# Turn on SHR
+c0b1:39		# Set bits [5:4]=11 to enable Interlaced mode
+c0b5:80		# Set bit 7 to enable Interlace mode
 
-to_pro can handle up to 51 files at a time--for example:
+And then KEGS will show 640x400 (or 320x400) SHR screen, where even lines
+(0,2,4,etc) come from bank $e1 like normal SHR mode, and odd lines come from
+bank $e0 (from $2000-$9fff, using it's own palettes, etc.).  The real VOC
+shows interlaced data--it draws one frame of data from bank $e1, then the
+next from of data from bank $e0, shifted down one line, etc., where each
+from takes 16msec, for an effective display of 30fps.  KEGS just draws both
+bank $e1 and bank $e1 changes every frame at 60fps.  This can be fixed if
+anyone uses this mode and wants better accuracy.
 
-to_pro -32000 *.shk
-
-...would put all *.shk files in the current Unix directory into a 31.25MB
-image called POOF1.
-
-To_pro tries to truncate Unix filenames to the 15 character ProDOS
-limit, and converts all punctuation to dots.  I've tested it enough
-that it has worked for my purposes.
-
-The algorithm to_pro uses to create a disk volume is possibly suspect.
-I recommend reformatting any images again inside KEGS (using GS/OS, for
-instance) just to make sure the directory structure is good.  To_pro
-is intended to put files into images quickly and easily, and then to
-copy the files off of those images onto images formatted from within
-KEGS by an Apple IIgs OS.
-
-Since ProDOS cannot handle > 32MB images, make sure you run to_pro with
-arguments under 32767.  I personally haven't tried a partition bigger
-than 30000K (about 2.5MB short of the maximum).  Well, you can use bigger
-images if you format them HFS, but I don't trust the GS/OS HFS driver.
-
-To_pro automatically sets the ProDOS filetype of files ending in ".shk"
-to $E0.
 
 Details on config.kegs and disk images
 --------------------------------------
@@ -570,10 +610,24 @@ Woz image, KEGS automatically acts as if fast_disk_emul is disabled.
 KEGS Timing:
 -----------
 
-KEGS supports running at four speeds:  1MHz, 2.8MHz, 8.0MHz, and Unlimited.
-Pressing the the F6 key cycles between these modes.  The 1MHz
-and 2.8MHz speeds force KEGS to run at exactly those speeds, providing
-accurate reproduction of a real Apple IIgs.
+KEGS supports running at four speeds:  1MHz, 2.8MHz, 8.0MHz-128MHz (ZipGS), and
+Unlimited.  Pressing the the F6 key cycles between these modes.  The
+1MHz and 2.8MHz speeds force KEGS to run at exactly those speeds,
+providing accurate reproduction of a real Apple IIgs.
+
+On regular host machines now, sitting at the BASIC prompt can make KEGS
+say the speed is 4000MHz or higher.  This is because the emulated code
+is reading the keyboard (or other softswitch) more often than 500,000
+times per second, and due to how slow accesses work, that's the most
+that can be done in one second, and so KEGS has lots of spare time, and
+makes the Eff MHz or Sim MHz be too high.  You have to run a BASIC
+program or do something not checking for keypresses so often to see what
+the true emulation speed is, so something like:
+
+10 A = SIN(A) + 1
+20 GOTO 10
+
+is a fine test.
 
 KEGS will always run at 1MHz at least.  If it is unable to keep up,
 it will extend the emulated time to maintain the illusion of running
@@ -582,7 +636,7 @@ instead of the usual 60.  This happens rarely.
 
 (There's a Mac OS X bug in recent releases after 10.13 which can cause KEGS
 to draw VERY slowly to the screen, such that KEGS falls below 1MHz.  On your
-Mac, go to the Apple Menu->System Prefernces, then select Displays.  Select
+Mac, go to the Apple Menu->System Settings, then select Displays.  Select
 the "Color" tab.  Change to a different setting, usually one with "RGB" in
 the name.  See if KEGS now easily exceeds 1MHz).
 
@@ -598,19 +652,24 @@ through the control panel.  But, 3.5" accesses will "speed up" to 2.8MHz
 to enable that code to operate correctly while the 3.5" disk is being
 accessed.
 
-If you force KEGS to run at 2.8MHz, KEGS tries to run at exactly 2.8MHz.  But
-like a real unaccelerated Apple IIgs, if you set the control panel to "slow",
-it will really be running at 1MHz.  Accesses to 5.25" disk automatically slow
-down to 1MHz, when running the IWM in accurate mode (F7) or when accessing a
-Woz image.  Many Apple IIgs demos must be run at 2.8MHz.  The built-in
-selftests (cmd-option-ctrl-Reset) must run at 2.8MHz.  Many Apple IIgs action
-games are more playable at 2.8MHz.
+If you force KEGS to run at 2.8MHz, KEGS tries to run at exactly 2.8MHz.
+But like a real unaccelerated Apple IIgs, if you set the control panel
+to "slow", it will really be running at 1MHz.  Accesses to 5.25" disk
+automatically slow down to 1MHz, when running the IWM in accurate mode
+(F7) or when accessing a Woz image.  Many Apple IIgs demos must be run
+at 2.8MHz.  The built-in selftests (cmd-option-ctrl-Reset) must run at
+2.8MHz.  Many Apple IIgs action games are more playable at 2.8MHz.
 
-The 8.0MHz setting means follow the ZipGS-selected speed, but don't go faster
-than 8.0MHz.  If your host computer cannot keep up, then the emulated second
-will be extended, and KEGS will have choppy audio and video.  You can use the
-ZipGS control panel, or ZIPPY.GS on the sample disk image to set the emulated
-ZipGS speed to anything from 1MHz to 8MHz in .5MHz increments.
+The 8.0MHz setting means follow the ZipGS-selected speed, but don't go
+faster than 8.0MHz.  This 8.0MHz value can be changed to 8MHz, 16MHz,
+32MHz, 64MHz, or 128MHz at the Configuration settings (Press F4), and
+change "ZipGS Speed = ".  If your host computer cannot keep up, then the
+emulated second will be extended, and KEGS will have choppy audio and
+video.  You can use the ZipGS control panel, or ZIPPY.GS on the sample
+disk image to set the emulated ZipGS speed to any 1/16th increment of
+the selected speed (so if you pick a ZipGS speed of 64MHz on the KEGS
+Configuration screen (F4), you can set the emulation speed to any value
+from 4-64MHz in 4MHz increments)
 
 The Unlimited setting means run as fast as possible, whatever speed that
 is (but always above 1MHz).  Eff MHz gives you the current Apple IIgs
@@ -777,9 +836,8 @@ self-tests to make the ROM checksum pass.  But other programs, like
 the Apple IIgs Diagnostic Disk, will detect a ROM checksum mismatch.
 Don't worry about it.
 
-Sound breaks up if KEGS is unable to keep up--it should only be happening
-if you are trying to force KEGS to run at 2.8MHz, but cannot due to
-sound and video overhead.
+Sound breaks up if KEGS is unable to keep up, this should not happen on
+any modern computer, but resizing the window can cause issues.
 
 
 Sound emulation:
@@ -797,76 +855,18 @@ If your display is not using shared memory, audio defaults to off unless
 you override it with "-audio 1".
 
 Mockingboard emulation is just for the AY8913 sound chip, not for the
-SC01 speech chip.  To use the Mockingboard, you must do Ctrl-Cmd-ESC to
-get to the IIgs control panel, select Control Panel, then Slots, then
-set slot 4 to "Your card".  Make sure you press return.  Then get out,
-and then do Ctrl-Cmd-Reset to restart KEGS (and make the change take
-effect).
+SC01 speech chip.  To use the Mockingboard, you must do Ctrl-Cmd-ESC
+(Ctrl-F1-F3 on Windows, for example) to get to the IIgs control panel,
+select Control Panel, then Slots, then set slot 4 to "Your card".  Make
+sure you press return.  Then get out, and then do Ctrl-Cmd-Reset.  The
+reset is a limitation of the IIgs ROM, it often doesn't seem to make
+proper register changes until the next Reset).
 
 
 SCC (Serial Port) emulation:
 ---------------------------
 
-KEGS emulates the two serial ports on a IIgs as being two Unix sockets.
-Port 1 (printer port) is at socket address 6501, and port 2 (modem)
-is at socket address 6502.
-
-By default, slot 1 is emulated using a simple receive socket, and slot 2
-emulates a Virtual Modem.
-
-A Virtual Modem means KEGS acts as if a modem is on the serial port
-allowing Apple II communcation programs to fully work, but connected to
-internet-enabled sockets.  KEGS emulates a "Hayes- Compatible" modem,
-meaning it accepts "AT" commands.  You can use KEGS to connect to free
-telnet-BBSs, or run a BBS program on KEGS and become a telnet BBS yourself.
-
-The two main AT commands are: ATDT for dialing out, and ATA for receiving
-calls.  To dial out, enter "ATDThostname", or for example,
-"ATDTboycot.no-ip.com" (which is down at the moment, unfortunately).
-You can also enter an IP address, like "ATDT127.0.0.1".  On a Mac, to
-create a telnet server to allow telnet connections (do not use over the
-internet, but on a private network behind a firewall, this should be
-fine), in a Terminal window type: "sudo /usr/libexec/telnetd -debug".
-You must then enable telnet on port 23 through your Mac OS X Firewall in
-the System Preferences->Sharing->Firewall page (just add port 23 as
-open--you'll need to use the "New..." button and then select Other for
-Port Name, and enter Port Number as 23). Then from KEGS in a
-communications program, do "ATDT127.0.0.1", and then log-in to your Mac.
-
-KEGS also accepts incoming "calls".  Start KEGS, and initialize the
-Virtual Modem with some AT command (ATZ resets all state, and is a useful
-start).  KEGS now has a socket port open, 6502 for slot 2, which you
-can connect to using any telnet program.  In a Terminal window, then
-type "telnet 127.0.0.1 6502" and you will connect to KEGS.  The Virtual
-Modem then starts printing "RING" every 2 seconds until you answer with
-"ATA".  You are now connected.  I have not tried BBS programs, but have
-made connections with ProTERM.
-
-On Windows XP SP2, when KEGS tries to open this incoming socket, you'll
-need to enable it and click Unblock to the dialog that Windows pops up.
-If you do not want incoming connections, you can block it instead.
-
-Once connected, you can go back to talking to the Virtual Modem by
-pressing + three times quickly (+++), and then not type anything for a second.
-This goes back to the AT-command mode.  You can now "ATH" to hang up, or
-"ATO" to go back online.
-
-On Windows, the socket code is very preliminary and there are problems
-receiving connections.
-
-KEGS also supports an older, simpler socket interface, which it defaults
-to using on slot 1.  In KEGS, from APPLESOFT, if you PR#1, all output will
-then be sent to socket port 6501.  You can see it by connecting to the
-port using telnet.  In another terminal window, do: "telnet localhost 6501"
-and then you will see all the output going to the "printer".
-
-Under APPLESOFT, you can PR#1 and IN#1.  This gets input from the
-socket also.  You can type in the telnet window, it will be sent on
-to the emulated IIgs.  You may want to go to the F4 Config Panel and set
-"mask off high bit" for serial port accesses to make PR#1 work a little nicer.
-
-You can "print" from BASIC by using something like PR#1 in KEGS and
-"telnet localhost 6501 | tee file.out" in another window.
+See README.serial.ports.txt.
 
 
 KEGS status area:
@@ -876,7 +876,7 @@ The status area is updated once each second.  It displays info I am
 (or was at some time) interested in seeing.
 
 Line 1: (Emulation speed info)
-dcycs:  number of seconds since KEGS was started
+dfcyc:  number of seconds since KEGS was started
 sim MHz:  Effective speed of KEGS instruction emulation, not counting
 		overhead for video or sound routines.
 Eff MHz:  Above, but with overhead accounted for.  Eff MHz is the
@@ -885,76 +885,24 @@ Eff MHz:  Above, but with overhead accounted for.  Eff MHz is the
 sec:	The number of real seconds that have passed during on of KEGS's
 		emulated seconds. Should be 1.00 +/- .01.  Under 1
 		means KEGS is running a bit fast, over 1 means KEGS is
-		running slow.  When you force speed to 2.5MHz, if KEGS
+		running slow.  When you force speed to 2.8MHz, if KEGS
 		can't keep up, it extends sec, so you can see how slow
 		it's really going here.
 vol:	Apple IIgs main audio volume control, in hex, from 0-F.
-pal:	Super-hires palette that is unavailable.  KEGS needs one palette
-		for the standard Apple // graphics mode on an 8-bit display,
-		and it grabs the least-used palette.  Defaults to 0xe.
-		You can try changing it with F10.  If you change it to a
-		palette that is not least used, KEGS changes it back in
-		one second.  Any superhires lines using the unavailable
-		palette will have their colors mapped into the
-		closest-matching "lores" colors, to minimize visual
-		impact.
 Limit:	Prints which speed setting the user has requested: 1MHz, 2.8MHz,
-		or Unlimited.
+		8MHz=128MHz, or Unlimited.
 
-Line 2: (Video and X info)
-xfer:  In hex, number of bytes transferred to the X screen per second.
-xred_cs:	Percentage of Unix processor cycles that were spent in the X
-		server (or other processes on the machine).
-ch_in:	Percentage of Unix processor cycles spent checking for X input Events.
-ref_l:	Percentage of Unix processor cycles spent scanning the Apple IIgs
-		memory for changes to the current display screen memory,
-		and copying those changes to internal XImage buffers.
-ref_x:	Percentage of Unix processor cycles spent sending those XImage buffers
-		to the X server.  Very similar to xred_cs.
+Line 2: (Host overhead)
+sleep_dtime:	Amount of time, in seconds, where KEGS "slept" for the last
+		second.  Indicates how idle KEGS was.
+out_16ms:	Amount of time, in seconds, KEGS spent drawing to the host
+		screen and other overhead, in the last second.
+in_16ms:	Amount of time, in seconds, KEGS spent emulating the Apple IIgs
+		in the last second.
+snd_pl:		Number of times a sound parameter was changed while it
+		was playing, but there will always be 60 per second minimum.
 
-Line 3: (Interpreter overhead)
-Ints:  Number of Apple IIgs interrupts over the last second.
-I/O:	Rate of I/O through the fake smartport interface (hard drives).
-		Does not count 3.5" or 5.25" disk accesses.
-BRK:	Number of BRKs over the last second.
-COP:	Number of COPs over the last second.
-Eng:	Number of calls to the main instruction interpreter loop in the
-		last second.  All "interrupts" or other special behavior
-		causes the main interpreter loop to exit.  A high call
-		rate here indicates a lot of overhead.  12000-15000 is normal.
-		20000+ indicates some sort of problem.
-act:	Some instructions are handled by the main interpreter loop returning
-		special status "actions" to main event loop.  This is the
-		number over the last second.  Should be low.
-hev:	This tracks HALT_EVENTs.  KEGS returns to the main loop to recalc
-		effective speed whenever any speed-changing I/O location is
-		touched.  See the code, mostly in moremem.c
-esi:	This counts the number of superhires scan-line interrupts
-		taken in the last second.
-edi:	This counts the number of Ensoniq "special events" over the last
-		second.  A sound that stops playing always causes a KEGS
-		event, even if it doesn't cause a IIgs interrupt.
-
-Line 4: (Ensoniq DOC info)
-snd1,2,3,4:  Percentage of Unix processor cycles spent handling various
-		sound activities.  snd1 is the total sum of all sound overhead.
-st:	Percentage of Unix cycles spent starting new Ensoniq oscillators.
-est:	Percentage of Unix cycles spent looking for 0 bytes in sounds.
-x.yz:	This final number is the average number of oscillators playing
-		over the last second.  Up to 4.00 is low overhead, over
-		20.0 is high overhead.
-
-Line 5: (Ensoniq DOC info)
-snd_plays:	Number of calls to a routine called sound_play, which
-		plays Ensoniq sounds.  Always called at least 60 times per sec.
-doc_ev:	Number of Ensoniq (DOC) events in the last second.  A sound
-		stopping is an event, but changing a parameter of a sound
-		while it is playing is also an event.
-st_snd:	 Number of sounds that were started in the last second.
-snd_parms:	Number of times a sound parameter was changed while it
-		was playing.
-
-Line 6: (IWM info)
+Line 3: (IWM info)
 For each IWM device, this line displays the current track (and side for
 3.5" disks).  If a disk is spinning, there will be an "*" next to the
 track number.  Only updated once a second, so the disk arm moving may
@@ -975,8 +923,6 @@ Describe my changes to SPEEDTEST.
 KEGS To-Do:
 ----------
 
-Better serial port emulation (printing, comm)
-Better nibblized images.
 Fix the Ensoniq bugs to make sound more accurate.
 
 -------------------

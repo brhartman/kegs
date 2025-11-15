@@ -1,4 +1,4 @@
-// $KmKId: defs_instr.h,v 1.64 2021-08-17 00:08:26+00 kentd Exp $
+// $KmKId: defs_instr.h,v 1.70 2023-11-05 16:22:26+00 kentd Exp $
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
@@ -60,6 +60,30 @@
 	GET_MEMORY16((direct + arg) & 0xffff, arg, 1);
 #endif
 
+#undef GET_DLOC_RD_RMW
+#undef GET_MEM_RMW
+
+#define GET_MEM_RMW()						\
+	if(!IS_ACC16) {						\
+		if(psr & 0x100) {				\
+			/* emulation re-writes the address */	\
+			SET_MEMORY8(addr_latch, arg);		\
+		} else {					\
+			/* otherwise, just read addr again */	\
+			GET_MEMORY8(addr_latch, dummy1);	\
+		}						\
+	} else {						\
+		/* 16-bit re-reads addr+1 again */		\
+		dummy1 = addr_latch + 1;			\
+		GET_MEMORY8(dummy1, dummy1);			\
+		addr_latch--;					\
+	}
+
+#define GET_DLOC_RD_RMW()			\
+	GET_DLOC_RD();				\
+	GET_MEM_RMW();
+
+
 #undef GET_DLOC_L_IND_RD
 
 #ifdef ACC8
@@ -103,6 +127,12 @@
 	INC_KPC_3;
 #endif
 
+#undef GET_ABS_RD_RMW
+
+#define GET_ABS_RD_RMW()			\
+	GET_ABS_RD();				\
+	GET_MEM_RMW();
+
 #undef GET_LONG_RD
 
 #ifdef ACC8
@@ -120,36 +150,33 @@
 #endif
 
 #undef GET_DLOC_IND_Y_RD
+#undef GET_DLOC_IND_Y_ADDR
 
 #ifdef ACC8
 # define GET_DLOC_IND_Y_RD()			\
-	GET_1BYTE_ARG;							\
-	GET_MEMORY_DIRECT_PAGE16((direct + arg) & 0xffff, tmp1);	\
-	tmp1 += (dbank << 16);						\
-	if(direct & 0xff) {						\
-		CYCLES_PLUS_1;						\
-	}								\
-	tmp2 = tmp1 + yreg;						\
-	if(((psr & 0x10) == 0) || ((tmp1 ^ tmp2) & 0xff00)) {		\
-		CYCLES_PLUS_1;						\
-	}								\
-	INC_KPC_2;							\
-	GET_MEMORY8(tmp2, arg);
+	GET_DLOC_IND_Y_ADDR(0)						\
+	GET_MEMORY8(arg, arg);
 #else
-# define GET_DLOC_IND_Y_RD()			\
+# define GET_DLOC_IND_Y_RD()						\
+	GET_DLOC_IND_Y_ADDR(0)						\
+	GET_MEMORY16(arg, arg, 0);
+#endif
+
+#define GET_DLOC_IND_Y_ADDR(is_write)					\
 	GET_1BYTE_ARG;							\
-	GET_MEMORY_DIRECT_PAGE16((direct + arg) & 0xffff, tmp1);	\
-	tmp1 += (dbank << 16);						\
 	if(direct & 0xff) {						\
 		CYCLES_PLUS_1;						\
 	}								\
-	tmp2 = tmp1 + yreg;						\
-	if(((psr & 0x10) == 0) || ((tmp1 ^ tmp2) & 0xff00)) {		\
+	GET_MEMORY_DIRECT_PAGE16((direct + arg) & 0xffff, tmp1, 0);	\
+	tmp1 += (dbank << 16);						\
+	arg = (tmp1 + yreg) & 0xffffff;					\
+	tmp2 = (tmp1 & 0xffff00) | (arg & 0xff);			\
+	if((psr & 0x10) && ((arg != tmp2) | is_write)) {		\
+		GET_MEMORY8(tmp2, tmp1);				\
+	} else if(((psr & 0x10) == 0) | (arg != tmp2) | is_write) {	\
 		CYCLES_PLUS_1;						\
 	}								\
-	INC_KPC_2;							\
-	GET_MEMORY16(tmp2, arg, 0);
-#endif
+	INC_KPC_2;
 
 #undef GET_DLOC_IND_RD
 
@@ -160,7 +187,7 @@
 	if(direct & 0xff) {				\
 		CYCLES_PLUS_1;				\
 	}						\
-	GET_MEMORY_DIRECT_PAGE16((direct + arg) & 0xffff, arg);	\
+	GET_MEMORY_DIRECT_PAGE16((direct + arg) & 0xffff, arg, 0);	\
 	GET_MEMORY8((dbank << 16) + arg, arg);
 #else
 # define GET_DLOC_IND_RD()				\
@@ -169,7 +196,7 @@
 	if(direct & 0xff) {				\
 		CYCLES_PLUS_1;				\
 	}						\
-	GET_MEMORY_DIRECT_PAGE16((direct + arg) & 0xffff, arg);	\
+	GET_MEMORY_DIRECT_PAGE16((direct + arg) & 0xffff, arg, 0);	\
 	GET_MEMORY16((dbank << 16) + arg, arg, 0);
 #endif
 
@@ -189,7 +216,7 @@
 			arg = (direct & 0xff00) | (arg & 0xff);		\
 		}							\
 	}								\
-	GET_MEMORY8(arg & 0xffff, arg);
+	GET_MEMORY8(arg, arg);
 #else
 # define GET_DLOC_X_RD()						\
 	GET_1BYTE_ARG;							\
@@ -199,13 +226,20 @@
 	}								\
 	INC_KPC_2;							\
 	arg = (arg + xreg + direct) & 0xffff;				\
-	if(psr & 0x100) {						\
+	if(!IS_ACC16 && (psr & 0x100)) {				\
 		if((direct & 0xff) == 0) {				\
 			arg = (direct & 0xff00) | (arg & 0xff);		\
 		}							\
 	}								\
 	GET_MEMORY16(arg, arg, 1);
 #endif
+
+#undef GET_DLOC_X_RD_RMW
+
+#define GET_DLOC_X_RD_RMW()						\
+	GET_DLOC_X_RD();						\
+	GET_MEM_RMW();
+
 
 #undef GET_DISP8_S_IND_Y_RD
 
@@ -235,15 +269,18 @@
 	GET_MEMORY16(arg, arg, 0);
 #endif
 
-#undef GET_ABS_INDEX_ADDR_FOR_RD
+#undef GET_ABS_INDEX_ADDR
 
-#define GET_ABS_INDEX_ADDR_FOR_RD(index_reg)			\
+#define GET_ABS_INDEX_ADDR(index_reg, is_write)			\
 	GET_2BYTE_ARG;						\
 	CYCLES_PLUS_1;						\
 	INC_KPC_3;						\
 	tmp1 = (dbank << 16) + arg;				\
 	arg = tmp1 + index_reg;					\
-	if(((psr & 0x10) == 0) || ((tmp1 ^ arg) & 0xff00)) {	\
+	tmp1 = (tmp1 & 0xffff00) + (arg & 0xff);		\
+	if((psr & 0x10) && ((tmp1 != arg) | is_write)) {	\
+		GET_MEMORY8(tmp1, tmp2);			\
+	} else if(((psr & 0x10) == 0) | (tmp1 != arg) | is_write) {	\
 		CYCLES_PLUS_1;					\
 	}
 
@@ -251,39 +288,33 @@
 
 #ifdef ACC8
 # define GET_ABS_Y_RD()				\
-	GET_ABS_INDEX_ADDR_FOR_RD(yreg);	\
+	GET_ABS_INDEX_ADDR(yreg, 0);		\
 	GET_MEMORY8(arg, arg);
 #else
 # define GET_ABS_Y_RD()				\
-	GET_ABS_INDEX_ADDR_FOR_RD(yreg);	\
+	GET_ABS_INDEX_ADDR(yreg, 0);		\
 	GET_MEMORY16(arg, arg, 0);
 #endif
 
 #undef GET_ABS_X_RD
-#undef GET_ABS_X_RD_WR
+#undef GET_ABS_X_RD_RMW
 
 #ifdef ACC8
-# define GET_ABS_X_RD()						\
-	GET_ABS_INDEX_ADDR_FOR_RD(xreg);			\
+# define GET_ABS_X_RD()					\
+	GET_ABS_INDEX_ADDR(xreg, 0);			\
 	GET_MEMORY8(arg, arg);
-
-# define GET_ABS_X_RD_WR()					\
-	GET_2BYTE_ARG;						\
-	INC_KPC_3;						\
-	CYCLES_PLUS_2;						\
-	arg = (dbank << 16) + ((arg + xreg) & 0xffff);		\
-	GET_MEMORY8(arg, arg);
+#define GET_ABS_X_RD_RMW()				\
+	GET_ABS_INDEX_ADDR(xreg, 1);			\
+	GET_MEMORY8(arg, arg);				\
+	GET_MEM_RMW();
 #else
-# define GET_ABS_X_RD()						\
-	GET_ABS_INDEX_ADDR_FOR_RD(xreg);			\
+# define GET_ABS_X_RD()					\
+	GET_ABS_INDEX_ADDR(xreg, 0);			\
 	GET_MEMORY16(arg, arg, 0);
-
-# define GET_ABS_X_RD_WR()					\
-	GET_2BYTE_ARG;						\
-	INC_KPC_3;						\
-	CYCLES_PLUS_2;						\
-	arg = (dbank << 16) + ((arg + xreg) & 0xffff);		\
-	GET_MEMORY16(arg, arg, 0);
+#define GET_ABS_X_RD_RMW()				\
+	GET_ABS_INDEX_ADDR(xreg, 1);			\
+	GET_MEMORY16(arg, arg, 0);			\
+	GET_MEM_RMW();
 #endif
 
 #undef GET_LONG_X_RD
@@ -470,14 +501,13 @@
 
 #ifdef ACC8
 # define TSB_INST(in_bank)			\
+	arg = arg & 0xff;			\
 	tmp1 = arg | acc;			\
-	CYCLES_PLUS_1;				\
 	zero = arg & acc;			\
 	SET_MEMORY8(addr_latch, tmp1);
 #else
 # define TSB_INST(in_bank)			\
 	tmp1 = arg | acc;			\
-	CYCLES_PLUS_1;				\
 	zero = arg & acc;			\
 	SET_MEMORY16(addr_latch, tmp1, in_bank);
 #endif
@@ -488,14 +518,12 @@
 # define ASL_INST(in_bank)			\
 	psr = (psr & 0x1fe) + ((arg >> 7) & 1);	\
 	tmp1 = (arg << 1) & 0xff;		\
-	CYCLES_PLUS_1;				\
 	SET_NEG_ZERO8(tmp1);			\
 	SET_MEMORY8(addr_latch, tmp1);
 #else
 # define ASL_INST(in_bank)			\
 	psr = (psr & 0x1fe) + ((arg >> 15) & 1);\
 	tmp1 = (arg << 1) & 0xffff;		\
-	CYCLES_PLUS_1;				\
 	SET_NEG_ZERO16(tmp1);			\
 	SET_MEMORY16(addr_latch, tmp1, in_bank);
 #endif
@@ -504,16 +532,15 @@
 
 #ifdef ACC8
 # define ROL_INST(in_bank)			\
+	arg = arg & 0xff;			\
 	arg = (arg << 1) | (psr & 1);		\
 	SET_MEMORY8(addr_latch, arg);		\
-	CYCLES_PLUS_1;				\
 	SET_NEG_ZERO8(arg & 0xff);		\
 	SET_CARRY8(arg);
 #else
 # define ROL_INST(in_bank)			\
 	arg = (arg << 1) | (psr & 1);		\
 	SET_MEMORY16(addr_latch, arg, in_bank);	\
-	CYCLES_PLUS_1;				\
 	SET_NEG_ZERO16(arg & 0xffff);		\
 	SET_CARRY16(arg);
 #endif
@@ -524,16 +551,14 @@
 # define LSR_INST(in_bank)				\
 	SET_CARRY8(arg << 8);				\
 	arg = (arg >> 1) & 0x7f;			\
-	SET_MEMORY8(addr_latch, arg);			\
-	CYCLES_PLUS_1;					\
-	SET_NEG_ZERO8(arg);
+	SET_NEG_ZERO8(arg);				\
+	SET_MEMORY8(addr_latch, arg);
 #else
 # define LSR_INST(in_bank)				\
 	SET_CARRY16(arg << 16);				\
 	arg = (arg >> 1) & 0x7fff;			\
-	SET_MEMORY16(addr_latch, arg, in_bank);		\
-	CYCLES_PLUS_1;					\
-	SET_NEG_ZERO16(arg);
+	SET_NEG_ZERO16(arg);				\
+	SET_MEMORY16(addr_latch, arg, in_bank);
 #endif
 
 #undef ROR_INST
@@ -544,7 +569,6 @@
 	SET_CARRY8(arg << 8);				\
 	arg = ((arg >> 1) & 0x7f) | (tmp1 << 7);	\
 	SET_MEMORY8(addr_latch, arg);			\
-	CYCLES_PLUS_1;					\
 	SET_NEG_ZERO8(arg);
 #else
 # define ROR_INST(in_bank)				\
@@ -552,7 +576,6 @@
 	SET_CARRY16(arg << 16);				\
 	arg = ((arg >> 1) & 0x7fff) | (tmp1 << 15);	\
 	SET_MEMORY16(addr_latch, arg, in_bank);		\
-	CYCLES_PLUS_1;					\
 	SET_NEG_ZERO16(arg);
 #endif
 
@@ -562,13 +585,11 @@
 # define TRB_INST(in_bank)			\
 	arg = arg & 0xff;			\
 	tmp1 = arg & ~acc;			\
-	CYCLES_PLUS_1;				\
 	zero = arg & acc;			\
 	SET_MEMORY8(addr_latch, tmp1);
 #else
 # define TRB_INST(in_bank)			\
 	tmp1 = arg & ~acc;			\
-	CYCLES_PLUS_1;				\
 	zero = arg & acc;			\
 	SET_MEMORY16(addr_latch, tmp1, in_bank);
 #endif
@@ -577,13 +598,11 @@
 
 #ifdef ACC8
 # define DEC_INST(in_bank)			\
-	CYCLES_PLUS_1;				\
 	arg = (arg - 1) & 0xff;			\
 	SET_MEMORY8(addr_latch, arg);		\
 	SET_NEG_ZERO8(arg);
 #else
 # define DEC_INST(in_bank)			\
-	CYCLES_PLUS_1;				\
 	arg = (arg - 1) & 0xffff;		\
 	SET_MEMORY16(addr_latch, arg, in_bank);	\
 	SET_NEG_ZERO16(arg);
@@ -593,13 +612,11 @@
 
 #ifdef ACC8
 # define INC_INST(in_bank)			\
-	CYCLES_PLUS_1;				\
 	arg = (arg + 1) & 0xff;			\
 	SET_MEMORY8(addr_latch, arg);		\
 	SET_NEG_ZERO8(arg);
 #else
 # define INC_INST(in_bank)			\
-	CYCLES_PLUS_1;				\
 	arg = (arg + 1) & 0xffff;		\
 	SET_MEMORY16(addr_latch, arg, in_bank);	\
 	SET_NEG_ZERO16(arg);
@@ -647,12 +664,12 @@
 		SET_MEMORY16(arg, xreg, in_bank);\
 	}
 
-#define C_LDX_ABS_Y()		\
-	GET_ABS_INDEX_ADDR_FOR_RD(yreg);	\
+#define C_LDX_ABS_Y()			\
+	GET_ABS_INDEX_ADDR(yreg, 0);	\
 	LDX_INST(0);
 
-#define C_LDY_ABS_X()	\
-	GET_ABS_INDEX_ADDR_FOR_RD(xreg);	\
+#define C_LDY_ABS_X()			\
+	GET_ABS_INDEX_ADDR(xreg, 0);	\
 	LDY_INST(0);
 
 #define C_LDX_ABS()		\

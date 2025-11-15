@@ -1,8 +1,8 @@
-const char rcsid_sound_driver_c[] = "@(#)$KmKId: sound_driver.c,v 1.29 2021-08-17 00:08:36+00 kentd Exp $";
+const char rcsid_sound_driver_c[] = "@(#)$KmKId: sound_driver.c,v 1.32 2023-06-05 18:41:09+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2021 by Kent Dickey		*/
+/*			Copyright 2002-2023 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -103,7 +103,7 @@ snddrv_init()
 		memset(shmaddr, 0, size);
 		g_sound_shm_addr = shmaddr;
 #ifdef MAC
-		macsnd_init(shmaddr);
+		macsnd_init();
 		return;
 #endif
 #ifdef _WIN32
@@ -277,8 +277,8 @@ snddrv_send_sound(int real_samps, int size)
 	} else {
 		tmp = size + 0xa1000000;
 	}
-	doc_log_rout("send_sound", -1, g_last_sound_play_dsamp,
-						(real_samps << 30) + size);
+	//doc_log_rout("send_sound", -1, g_last_sound_play_dsamp,
+	//					(real_samps << 30) + size);
 
 	call_playit = 0;
 #if defined(MAC) || defined(_WIN32)

@@ -1,8 +1,8 @@
-const char rcsid_joystick_driver_c[] = "@(#)$KmKId: joystick_driver.c,v 1.18 2021-09-19 04:50:12+00 kentd Exp $";
+const char rcsid_joystick_driver_c[] = "@(#)$KmKId: joystick_driver.c,v 1.23 2023-09-26 02:59:00+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2021 by Kent Dickey		*/
+/*			Copyright 2002-2023 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -13,7 +13,6 @@ const char rcsid_joystick_driver_c[] = "@(#)$KmKId: joystick_driver.c,v 1.18 202
 /************************************************************************/
 
 #include "defc.h"
-#include <sys/time.h>
 
 #ifdef __linux__
 # include <linux/joystick.h>
@@ -48,8 +47,7 @@ void
 joystick_init()
 {
 	char	joy_name[MAX_JOY_NAME];
-	int	version;
-	int	fd;
+	int	version, fd;
 	int	i;
 
 	fd = open(g_joystick_dev, O_RDONLY | O_NONBLOCK);
@@ -79,22 +77,15 @@ joystick_init()
 		g_paddle_val[i] = 32767;
 	}
 	g_paddle_buttons = 0xc;
-
-	joystick_update(0.0);
 }
 
 /* joystick_update_linux() called from paddles.c.  Update g_paddle_val[] */
 /*  and g_paddle_buttons with current information */
 void
-joystick_update(double dcycs)
+joystick_update(dword64 dfcyc)
 {
 	struct js_event js;	/* the linux joystick event record */
-	int	mask;
-	int	val;
-	int	num;
-	int	type;
-	int	ret;
-	int	len;
+	int	mask, val, num, type, ret, len;
 	int	i;
 
 	/* suck up to 20 events, then give up */
@@ -124,7 +115,7 @@ joystick_update(double dcycs)
 	}
 
 	if(i > 0) {
-		paddle_update_trigger_dcycs(dcycs);
+		paddle_update_trigger_dcycs(dfcyc);
 	}
 }
 
@@ -136,6 +127,9 @@ joystick_update_buttons()
 
 #ifdef _WIN32
 # define JOYSTICK_DEFINED
+#undef JOYSTICK_DEFINED
+	// HACK: remove
+#if 0
 void
 joystick_init()
 {
@@ -177,12 +171,10 @@ joystick_init()
 		g_paddle_val[i] = 32767;
 	}
 	g_paddle_buttons = 0xc;
-
-	joystick_update(0.0);
 }
 
 void
-joystick_update(double dcycs)
+joystick_update(dword64 dfcyc)
 {
 	JOYCAPS joycap;
 	JOYINFO info;
@@ -208,7 +200,7 @@ joystick_update(double dcycs)
 		} else {
 			g_paddle_buttons = g_paddle_buttons & (~2);
 		}
-		paddle_update_trigger_dcycs(dcycs);
+		paddle_update_trigger_dcycs(dfcyc);
 	}
 }
 
@@ -235,6 +227,7 @@ joystick_update_buttons()
 		}
 	}
 }
+#endif
 #endif
 
 #ifdef MAC
@@ -383,7 +376,7 @@ joystick_init()
 				(usage != kHIDUsage_GD_MultiAxisController)) {
 			continue;
 		}
-		printf(" JOYSTICK FOUND!\n");
+		printf(" JOYSTICK FOUND, vendor:%08x!\n", vendor);
 		IOHIDDeviceOpen(device, kIOHIDOptionsTypeNone);
 		IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetCurrent(),
 							kCFRunLoopCommonModes);
@@ -397,11 +390,11 @@ joystick_init()
 }
 
 void
-joystick_update(double dcycs)
+joystick_update(dword64 dfcyc)
 {
 	int	i;
 
-	if(dcycs) {
+	if(dfcyc) {
 		// Avoid unused parameter warnings
 	}
 	for(i = 0; i < 4; i++) {
@@ -412,7 +405,7 @@ joystick_update(double dcycs)
 		g_paddle_buttons = 0xc | (g_joystick_callback_buttons & 3);
 		g_paddle_val[0] = g_joystick_callback_x;
 		g_paddle_val[1] = g_joystick_callback_y;
-		paddle_update_trigger_dcycs(dcycs);
+		paddle_update_trigger_dcycs(dfcyc);
 	}
 }
 
@@ -436,11 +429,11 @@ joystick_init()
 }
 
 void
-joystick_update(double dcycs)
+joystick_update(dword64 dfcyc)
 {
 	int	i;
 
-	if(dcycs) {
+	if(dfcyc) {
 		// Avoid unused parameter warnings
 	}
 	for(i = 0; i < 4; i++) {
@@ -451,7 +444,7 @@ joystick_update(double dcycs)
 		g_paddle_buttons = 0xc | (g_joystick_callback_buttons & 3);
 		g_paddle_val[0] = g_joystick_callback_x;
 		g_paddle_val[1] = g_joystick_callback_y;
-		paddle_update_trigger_dcycs(dcycs);
+		paddle_update_trigger_dcycs(dfcyc);
 	}
 }
 

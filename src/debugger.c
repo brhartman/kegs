@@ -1,8 +1,8 @@
-const char rcsid_debugger_c[] = "@(#)$KmKId: debugger.c,v 1.42 2021-12-19 20:45:11+00 kentd Exp $";
+const char rcsid_debugger_c[] = "@(#)$KmKId: debugger.c,v 1.60 2023-09-11 12:55:28+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2021 by Kent Dickey		*/
+/*			Copyright 2002-2023 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -44,7 +44,7 @@ int	g_debug_to_stdout = 1;
 extern byte *g_memory_ptr;
 extern byte *g_slow_memory_ptr;
 extern int g_halt_sim;
-extern int g_c068_statereg;
+extern word32 g_c068_statereg;
 extern word32 stop_run_at;
 extern int Verbose;
 extern int Halt_on;
@@ -54,13 +54,18 @@ extern Kimage g_debugwin_kimage;
 extern int g_config_control_panel;
 extern word32 g_mem_size_total;
 
+extern char *g_sound_file_str;
+extern word32 g_sound_file_bytes;
+
 int	g_num_breakpoints = 0;
 Break_point g_break_pts[MAX_BREAK_POINTS];
 
 extern int g_irq_pending;
 
+extern dword64 g_last_vbl_dcyc;
+extern int g_ret1;
 extern Engine_reg engine;
-extern double g_fcycles_end;
+extern dword64 g_dcycles_end;
 
 int g_stepping = 0;
 
@@ -91,7 +96,6 @@ Data_log *g_log_data_ptr = &(g_data_log_array[0]);
 Data_log *g_log_data_start_ptr = &(g_data_log_array[0]);
 Data_log *g_log_data_end_ptr = &(g_data_log_array[PC_LOG_LEN]);
 
-int	g_quit_sim_now = 0;
 char	g_cmd_buffer[MAX_CMD_BUFFER + 2] = { 0 };
 int	g_cmd_buffer_len = 2;
 
@@ -103,9 +107,94 @@ debugger_init()
 {
 	debugger_help();
 	g_list_kpc = engine.kpc;
+#if 0
+	if(g_num_breakpoints == 0) {
+		set_bp(0xff5a0e, 0xff5a0e, 4);
+		set_bp(0x00c50a, 0x00c50a, 4);
+		set_bp(0x00c50d, 0x00c50d, 4);
+	}
+#endif
 }
 
 int g_dbg_new_halt = 0;
+
+void
+check_breakpoints(word32 addr, dword64 dfcyc, word32 maybe_stack,
+							word32 type)
+{
+	Break_point *bp_ptr;
+	int	count;
+	int	i;
+
+	count = g_num_breakpoints;
+	for(i = 0; i < count; i++) {
+		bp_ptr = &(g_break_pts[i]);
+		if((type & bp_ptr->acc_type) == 0) {
+			continue;
+		}
+		if((addr >= (bp_ptr->start_addr & 0xffffff)) &&
+				(addr <= (bp_ptr->end_addr & 0xffffff))) {
+			debug_hit_bp(addr, dfcyc, maybe_stack, type, i);
+		}
+	}
+
+	if((type == 4) && ((addr == 0xe10000) || (addr == 0xe10004))) {
+		FINISH(RET_TOOLTRACE, 0);
+	}
+}
+
+void
+debug_hit_bp(word32 addr, dword64 dfcyc, word32 maybe_stack, word32 type,
+								int pos)
+{
+	word32	trk_side, side, trk, cmd, unit, buf, blk, param_cnt, list_ptr;
+	word32	status_code, cmd_list, stack, rts;
+
+	if((addr == 0xff5a0e) && (type == 4)) {
+		trk_side = get_memory_c(0xe10f32);
+		side = (trk_side >> 5) & 1;
+		trk = get_memory_c(0xe10f34) + ((trk_side & 0x1f) << 6);
+		buf = get_memory_c(0x42) | (get_memory_c(0x43) << 8) |
+						(get_memory_c(0x44) << 16);
+		printf("ff5a0e: 3.5 read of track %03x side:%d sector:%03x to "
+			"%06x at %016llx\n", trk, side, get_memory_c(0xe10f33),
+			buf, dfcyc);
+		return;
+	}
+	if((addr == 0x00c50a) && (type == 4)) {
+		cmd = get_memory_c(0x42);
+		unit = get_memory_c(0x43);
+		buf = get_memory_c(0x44) | (get_memory_c(0x45) << 8);
+		blk = get_memory_c(0x46) | (get_memory_c(0x47) << 8);
+		printf("00c50a: cmd %02x u:%02x buf:%04x blk:%04x at %016llx\n",
+			cmd, unit, buf, blk, dfcyc);
+		return;
+	}
+	if((addr == 0x00c50d) && (type == 4)) {
+		stack = maybe_stack & 0xffff;
+		rts = get_memory_c(stack + 1) | (get_memory_c(stack + 2) << 8);
+		cmd = get_memory_c(rts + 1);
+		cmd_list = get_memory_c(rts + 2) | (get_memory_c(rts+3) << 8);
+		param_cnt = get_memory_c(cmd_list);
+		unit = get_memory_c(cmd_list + 1);
+		list_ptr = get_memory_c(cmd_list + 2) |
+					(get_memory_c(cmd_list + 3) << 8);
+		status_code = get_memory_c(cmd_list + 4);
+		printf("00c50d: stack:%04x rts:%04x cmd:%02x cmd_list:%04x "
+			"param_cnt:%02x unit:%02x listptr:%04x "
+			"status:%02x at %016llx\n", stack, rts, cmd, cmd_list,
+			param_cnt, unit, list_ptr, status_code, dfcyc);
+		printf("  list_ptr: %04x: %02x %02x %02x %02x %02x %02x %02x\n",
+			list_ptr, get_memory_c(list_ptr),
+			get_memory_c(list_ptr + 1), get_memory_c(list_ptr + 2),
+			get_memory_c(list_ptr + 3), get_memory_c(list_ptr + 4),
+			get_memory_c(list_ptr + 5), get_memory_c(list_ptr + 6));
+		return;
+	}
+
+	dbg_log_info(dfcyc, addr, pos, 0x6270);
+	halt2_printf("Hit breakpoint at %06x\n", addr);
+}
 
 int
 debugger_run_16ms()
@@ -122,9 +211,12 @@ debugger_run_16ms()
 }
 
 void
-dbg_log_info(double dcycs, word32 info1, word32 info2, word32 type)
+dbg_log_info(dword64 dfcyc, word32 info1, word32 info2, word32 type)
 {
-	g_log_data_ptr->dcycs = dcycs;
+	if(dfcyc == 0) {
+		return;		// Ignore some IWM t:00e7 events and others
+	}
+	g_log_data_ptr->dfcyc = dfcyc;
 	g_log_data_ptr->stat = 0;
 	g_log_data_ptr->addr = info1;
 	g_log_data_ptr->val = info2;
@@ -142,34 +234,46 @@ debugger_update_list_kpc()
 }
 
 void
-debugger_key_event(int a2code, int is_up, int shift_down, int ctrl_down,
-							int lock_down)
+debugger_key_event(Kimage *kimage_ptr, int a2code, int is_up)
 {
+	word32	c025_val, special;
 	int	key, pos, changed;
 
 	pos = 1;
-	if(shift_down) {
+
+	c025_val = kimage_ptr->c025_val;
+
+	if(c025_val & 1) {		// Shift is down
 		pos = 2;
-	} else if(lock_down) {
+	} else if(c025_val & 4) {	// Capslock is down
 		key = g_a2_key_to_ascii[a2code][1];
 		if((key >= 'a') && (key <= 'z')) {
 			pos = 2;		// CAPS LOCK on
 		}
 	}
-	if(ctrl_down) {
+	if(c025_val & 2) {		// Ctrl is down
 		pos = 3;
 	}
 	key = g_a2_key_to_ascii[a2code][pos];
-	if((key < 0) || is_up) {
+	if(key < 0) {
 		return;
+	}
+	special = (key >> 8) & 0xff;		// c025 changes
+	if(is_up) {
+		c025_val = c025_val & (~special);
+	} else {
+		c025_val = c025_val | special;
+	}
+	kimage_ptr->c025_val = c025_val;
+	if(is_up) {
+		return;		// Nothing else to do
 	}
 	if(key >= 0x80) {
 		// printf("key: %04x\n", key);
 		if(key == 0x8007) {			// F7 - close debugger
-			video_set_active(&g_debugwin_kimage,
-						!g_debugwin_kimage.active);
+			video_set_active(kimage_ptr, !kimage_ptr->active);
 			printf("Toggled debugger window to:%d\n",
-						g_debugwin_kimage.active);
+						kimage_ptr->active);
 		}
 		if((key & 0xff) == 0x74) {		// Page up keycode
 			debugger_page_updown(1);
@@ -302,12 +406,14 @@ debugger_redraw_screen(Kimage *kimage_ptr)
 void
 debug_draw_debug_line(Kimage *kimage_ptr, int line, int vid_line)
 {
+	word32	line_bytes;
 	int	i;
 
 	// printf("draw debug line:%d at vid_line:%d\n", line, vid_line);
 	for(i = 7; i >= 0; i--) {
+		line_bytes = (vid_line << 16) | (40 << 8) | 0;
 		redraw_changed_string(&(g_debug_lines_ptr[line].str_buf[0]),
-			vid_line, -1L, kimage_ptr->wptr + 8, 0, 0x00ffffff,
+			line_bytes, -1L, kimage_ptr->wptr + 8, 0, 0x00ffffff,
 			kimage_ptr->a2_width_full, 1);
 		vid_line--;
 	}
@@ -345,6 +451,7 @@ Dbg_longcmd g_debug_longcmds[] = {
 					"bp ADDR: sets breakpoint on addr" },
 	{ "logpc",	debug_logpc,	&g_debug_logpc[0], "Log PC" },
 	{ "iwm",	debug_iwm,	&g_debug_iwm[0], "IWM" },
+	{ "soundfile",	debug_soundfile, 0, "Save sound to a WAV file" },
 	{ 0, 0, 0, 0 }
 };
 
@@ -420,7 +527,7 @@ dbg_help_show_strs(int help_depth, const char *str, const char *help_str)
 	blank_str = "        " "        " "        ";
 	blank_len = (int)strlen(blank_str);		// should be >=17
 	column = 17;
-	len = strlen(str);
+	len = (int)strlen(str);
 	if(help_depth < 0) {
 		help_depth = 0;
 	}
@@ -581,8 +688,8 @@ do_debug_cmd(const char *in_str)
 				}
 				track = g_a2;
 			}
-			iwm_show_track(slot_drive, track, 0.0);
-			iwm_show_stats();
+			iwm_show_track(slot_drive, track, 0);
+			iwm_show_stats(slot_drive);
 			break;
 		case 'E':
 			doc_show_ensoniq_state();
@@ -650,7 +757,7 @@ do_debug_cmd(const char *in_str)
 				stop_run_at = g_a1;
 				dbg_printf("Calling add_event for t:%08x\n",
 									g_a1);
-				add_event_stop((double)g_a1);
+				add_event_stop(((dword64)g_a1) << 16);
 				dbg_printf("set stop_run_at = %x\n", g_a1);
 			}
 			break;
@@ -661,7 +768,6 @@ do_debug_cmd(const char *in_str)
 			do_debug_list();
 			break;
 		case 'Z':
-			show_scc_log();
 			show_scc_state();
 			break;
 		case 'S':
@@ -689,7 +795,7 @@ do_debug_cmd(const char *in_str)
 				dbg_printf("got_num:%d, a2bank:%x, g_a2:%x\n",
 						got_num, g_a2bank, g_a2);
 				set_bp((g_a2bank << 16) + g_a2,
-						(g_a2bank << 16) + g_a2);
+						(g_a2bank << 16) + g_a2, 4);
 			} else {
 				show_bp();
 			}
@@ -864,6 +970,50 @@ debug_getnum(const char **str_ptr)
 	return (word32)-1L;
 }
 
+char *
+debug_get_filename(const char **str_ptr)
+{
+	const char *str, *start_str;
+	char	*new_str;
+	int	c, len;
+
+	// Go to first whitespace (or end of str), then kegs_malloc_str()
+	//  the string and copy to it
+	str = *str_ptr;
+	start_str = 0;
+	//printf("get_filename, str now :%s:\n", str);
+	while(1) {
+		c = *str++;
+		if(c == 0) {
+			break;
+		}
+		if((c == ' ') || (c == '\t') || (c == '\n')) {
+			//printf("c:%02x at str :%s: , start_str:%p\n", c, str,
+			//					start_str);
+			if(start_str) {
+				break;
+			}
+			continue;
+		}
+		// Else it's a valid char, set start_str if needed
+		if(!start_str) {
+			start_str = str - 1;
+			//printf("Got c:%02x, start_str :%s:\n", c, start_str);
+		}
+	}
+	new_str = 0;
+	if(start_str) {
+		len = (int)(str - start_str);
+		if(len > 1) {
+			new_str = malloc(len);
+			memcpy(new_str, start_str, len);
+			new_str[len - 1] = 0;
+		}
+	}
+	*str_ptr = str;
+	return new_str;
+}
+
 void
 debug_help(const char *str)
 {
@@ -907,7 +1057,7 @@ debug_bp_clear_all(const char *str)
 void
 debug_bp_setclr(const char *str, int is_set_clear)
 {
-	word32	addr, end_addr;
+	word32	addr, end_addr, acc_type;
 
 	printf("In debug_bp: %s\n", str);
 
@@ -926,11 +1076,26 @@ debug_bp_setclr(const char *str, int is_set_clear)
 			end_addr = addr;
 		}
 	}
+	acc_type = 4;
+	acc_type = debug_getnum(&str);
+	if(acc_type == (word32)-1L) {
+		acc_type = 4;			// Code breakpoint
+	}
 	if(is_set_clear == 2) {			// clear
 		delete_bp(addr, end_addr);
 	} else {				// set, or nothing
-		set_bp(addr, end_addr);
+		set_bp(addr, end_addr, acc_type);
 	}
+}
+
+void
+debug_soundfile(const char *cmd_str)
+{
+	char	*str;
+
+	// See if there's an argument
+	str = debug_get_filename(&cmd_str);	// str=0 if no argument
+	sound_file_start(str);			// str==0 means close file
 }
 
 void
@@ -950,7 +1115,7 @@ debug_logpc_on(const char *str)
 		// Dummy use of argument
 	}
 	g_log_pc_enable = 1;
-	g_fcycles_end = 0;
+	g_dcycles_end = 0;
 	dbg_printf("Enabled logging of PC and data accesses\n");
 }
 
@@ -961,22 +1126,22 @@ debug_logpc_off(const char *str)
 		// Dummy use of argument
 	}
 	g_log_pc_enable = 0;
-	g_fcycles_end = 0;
+	g_dcycles_end = 0;
 	dbg_printf("Disabled logging of PC and data accesses\n");
 }
 
 void
-debug_logpc_out_data(FILE *pcfile, Data_log *log_data_ptr, double start_dcycs)
+debug_logpc_out_data(FILE *pcfile, Data_log *log_data_ptr, dword64 start_dcyc)
 {
 	char	*str, *shadow_str;
 	dword64	lstat, offset64, offset64slow, addr64;
 	word32	wstat, addr, size, val;
 
 	addr = log_data_ptr->addr;
-	lstat = (unsigned long)(log_data_ptr->stat);
+	lstat = (dword64)(log_data_ptr->stat);
 	wstat = lstat & 0xff;
 	addr64 = lstat - wstat + (addr & 0xff);
-	offset64 = addr64 - (unsigned long)&(g_memory_ptr[0]);
+	offset64 = addr64 - (dword64)&(g_memory_ptr[0]);
 	str = "IO";
 	shadow_str = "";
 	if((wstat & BANK_SHADOW) || (wstat & BANK_SHADOW2)) {
@@ -984,11 +1149,12 @@ debug_logpc_out_data(FILE *pcfile, Data_log *log_data_ptr, double start_dcycs)
 	}
 	size = log_data_ptr->size;
 	if(size > 32) {
-		fprintf(pcfile, "INFO %08x %08x %04x t:%04x %9.2f\n",
+		fprintf(pcfile, "INFO %08x %08x %04x t:%04x %lld.%02lld\n",
 			log_data_ptr->addr, log_data_ptr->val, size >> 16,
-			size & 0xffff, log_data_ptr->dcycs - start_dcycs);
+			size & 0xffff, (log_data_ptr->dfcyc - start_dcyc)>>16,
+			((log_data_ptr->dfcyc & 0xffff) * 100) >> 16);
 	} else {
-		offset64slow = addr64 - (unsigned long)&(g_slow_memory_ptr[0]);
+		offset64slow = addr64 - (dword64)&(g_slow_memory_ptr[0]);
 		if(offset64 < g_mem_size_total) {
 			str = "mem";
 		} else if(offset64slow < 0x20000) {
@@ -1007,10 +1173,36 @@ debug_logpc_out_data(FILE *pcfile, Data_log *log_data_ptr, double start_dcycs)
 		} else {
 			fprintf(pcfile, "%06x (%d) ", val, size);
 		}
-		fprintf(pcfile, "%9.2f, %s[%06llx] %s\n",
-				log_data_ptr->dcycs - start_dcycs, str,
-				offset64 & 0xffffffULL, shadow_str);
+		fprintf(pcfile, "%lld.%02lld, %s[%06llx] %s\n",
+				(log_data_ptr->dfcyc - start_dcyc) >> 16,
+				((log_data_ptr->dfcyc & 0xffff) * 100) >> 16,
+				str, offset64 & 0xffffffULL, shadow_str);
 	}
+}
+
+Data_log *
+debug_show_data_info(FILE *pcfile, Data_log *log_data_ptr, dword64 base_dcyc,
+			dword64 dfcyc, dword64 start_dcyc, int *data_wrap_ptr,
+			int *count_ptr)
+{
+
+	while((*data_wrap_ptr < 2) && (log_data_ptr->dfcyc <= dfcyc) &&
+					(log_data_ptr->dfcyc >= start_dcyc)) {
+		if(*count_ptr >= PC_LOG_LEN) {
+			break;
+		}
+		debug_logpc_out_data(pcfile, log_data_ptr, base_dcyc);
+		if(log_data_ptr->dfcyc == 0) {
+			break;
+		}
+		log_data_ptr++;
+		(*count_ptr)++;
+		if(log_data_ptr >= g_log_data_end_ptr) {
+			log_data_ptr = g_log_data_start_ptr;
+			(*data_wrap_ptr)++;
+		}
+	}
+	return log_data_ptr;
 }
 
 void
@@ -1020,9 +1212,9 @@ debug_logpc_save(const char *cmd_str)
 	Pc_log	*log_pc_ptr;
 	Data_log *log_data_ptr;
 	char	*str;
-	double	dcycs, start_dcycs, base_dcycs;
+	dword64	dfcyc, start_dcyc, base_dcyc, max_dcyc;
 	word32	instr, psr, acc, xreg, yreg, stack, direct, dbank, kpc, num;
-	int	data_wrap, accsize, xsize, abs_time;
+	int	data_wrap, accsize, xsize, abs_time, data_count;
 	int	i;
 
 	// See if there's an argument
@@ -1048,53 +1240,47 @@ debug_logpc_save(const char *cmd_str)
 #endif
 #if 0
 	fprintf(pcfile, "current pc_log_ptr: %p, start: %p, end: %p\n",
-		log_pc_ptr, log_pc_start_ptr, log_pc_end_ptr);
+		log_pc_ptr, g_log_pc_start_ptr, g_log_pc_end_ptr);
 #endif
 
 	// See if we haven't filled buffer yet
-	if(log_pc_ptr->dcycs == 0) {
+	if(log_pc_ptr->dfcyc == 0) {
 		log_pc_ptr = g_log_pc_start_ptr;
 	}
-	if(log_data_ptr->dcycs == 0) {
+	if(log_data_ptr->dfcyc == 0) {
 		log_data_ptr = g_log_data_start_ptr;
 		data_wrap = 1;
 	}
 
-	start_dcycs = log_pc_ptr->dcycs;
-	// Round to an integer
-	start_dcycs = (double)((long long)start_dcycs);
-	base_dcycs = start_dcycs;
+	start_dcyc = log_pc_ptr->dfcyc;
+	// Round to an exact usec
+	start_dcyc = (start_dcyc >> 16) << 16;
+	base_dcyc = start_dcyc;
 	if(abs_time) {
-		base_dcycs = 0.0;			// Show absolute time
+		base_dcyc = 0;				// Show absolute time
 	}
-	dcycs = start_dcycs;
+	dfcyc = start_dcyc;
 
 	data_wrap = 0;
+	data_count = 0;
 	/* find first data entry */
-	while((data_wrap < 2) && (log_data_ptr->dcycs < dcycs)) {
+	while((data_wrap < 2) && (log_data_ptr->dfcyc < dfcyc)) {
 		log_data_ptr++;
 		if(log_data_ptr >= g_log_data_end_ptr) {
 			log_data_ptr = g_log_data_start_ptr;
 			data_wrap++;
 		}
 	}
-	fprintf(pcfile, "start_dcycs: %9.2f, first entry:%9.2f\n", start_dcycs,
-							log_pc_ptr->dcycs);
+	fprintf(pcfile, "start_dcyc: %016llx, first entry:%016llx\n",
+						start_dcyc, log_pc_ptr->dfcyc);
 
+	dfcyc = start_dcyc;
+	max_dcyc = dfcyc;
 	for(i = 0; i < PC_LOG_LEN; i++) {
-		dcycs = log_pc_ptr->dcycs;
-		while((data_wrap < 2) && (log_data_ptr->dcycs <= dcycs) &&
-					(log_data_ptr->dcycs >= start_dcycs)) {
-			debug_logpc_out_data(pcfile, log_data_ptr, base_dcycs);
-			if(log_data_ptr->dcycs == 0) {
-				break;
-			}
-			log_data_ptr++;
-			if(log_data_ptr >= g_log_data_end_ptr) {
-				log_data_ptr = g_log_data_start_ptr;
-				data_wrap++;
-			}
-		}
+		dfcyc = log_pc_ptr->dfcyc;
+		log_data_ptr = debug_show_data_info(pcfile, log_data_ptr,
+				base_dcyc, dfcyc, start_dcyc,
+				&data_wrap, &data_count);
 		dbank = (log_pc_ptr->dbank_kpc >> 24) & 0xff;
 		kpc = log_pc_ptr->dbank_kpc & 0xffffff;
 		instr = log_pc_ptr->instr;
@@ -1116,28 +1302,36 @@ debug_logpc_save(const char *cmd_str)
 
 		str = do_dis(kpc, accsize, xsize, 1, instr, 0);
 		fprintf(pcfile, "%06x] A:%04x X:%04x Y:%04x P:%03x "
-			"S:%04x D:%04x B:%02x %9.2f %s\n", i,
+			"S:%04x D:%04x B:%02x %lld.%02lld %s\n", i,
 			acc, xreg, yreg, psr, stack, direct, dbank,
-			(dcycs - base_dcycs), str);
+			(dfcyc - base_dcyc) >> 16,
+			((dfcyc & 0xffff) * 100) >> 16, str);
 
-		if((dcycs == 0) && (i != 0)) {
+		if((dfcyc == 0) && (i != 0)) {
 			break;
 		}
+		max_dcyc = dfcyc;
 		log_pc_ptr++;
 		if(log_pc_ptr >= g_log_pc_end_ptr) {
 			log_pc_ptr = g_log_pc_start_ptr;
 		}
 	}
 
+	// Print any more DATA or INFO after last PC entry
+	log_data_ptr = debug_show_data_info(pcfile, log_data_ptr,
+			base_dcyc, max_dcyc + 10 * 65536, start_dcyc,
+			&data_wrap, &data_count);
+
 	fclose(pcfile);
 }
 
 void
-set_bp(word32 addr, word32 end_addr)
+set_bp(word32 addr, word32 end_addr, word32 acc_type)
 {
 	int	count;
 
-	dbg_printf("About to set BP at %06x - %06x\n", addr, end_addr);
+	dbg_printf("About to set BP at %06x - %06x, type:%02x\n", addr,
+							end_addr, acc_type);
 	count = g_num_breakpoints;
 	if(count >= MAX_BREAK_POINTS) {
 		dbg_printf("Too many (0x%02x) breakpoints set!\n", count);
@@ -1146,6 +1340,7 @@ set_bp(word32 addr, word32 end_addr)
 
 	g_break_pts[count].start_addr = addr;
 	g_break_pts[count].end_addr = end_addr;
+	g_break_pts[count].acc_type = acc_type;
 	g_num_breakpoints = count + 1;
 	fixup_brks();
 }
@@ -1153,17 +1348,34 @@ set_bp(word32 addr, word32 end_addr)
 void
 show_bp()
 {
-	word32	addr, end_addr;
-	int i;
+	char	acc_str[4];
+	word32	addr, end_addr, acc_type;
+	int	i;
 
 	dbg_printf("Showing breakpoints set\n");
 	for(i = 0; i < g_num_breakpoints; i++) {
 		addr = g_break_pts[i].start_addr;
 		end_addr = g_break_pts[i].end_addr;
+		acc_type = g_break_pts[i].acc_type;
+		acc_str[0] = ' ';
+		acc_str[1] = ' ';
+		acc_str[2] = ' ';
+		acc_str[3] = 0;
+		if(acc_type & 4) {
+			acc_str[2] = 'X';
+		}
+		if(acc_type & 2) {
+			acc_str[1] = 'W';
+		}
+		if(acc_type & 1) {
+			acc_str[0] = 'R';
+		}
 		if(end_addr != addr) {
-			dbg_printf("bp:%02x: %06x-%06x\n", i, addr, end_addr);
+			dbg_printf("bp:%02x: %06x-%06x, t:%02x %s\n", i, addr,
+						end_addr, acc_type, acc_str);
 		} else {
-			dbg_printf("bp:%02x: %06x\n", i, addr);
+			dbg_printf("bp:%02x: %06x, t:%02x %s\n", i, addr,
+							acc_type, acc_str);
 		}
 	}
 }
@@ -1206,7 +1418,7 @@ debug_iwm(const char *str)
 	if(str) {
 		// Dummy use of argument
 	}
-	iwm_show_track(-1, -1, 0.0);
+	iwm_show_track(-1, -1, 0);
 }
 
 void
@@ -1215,7 +1427,7 @@ debug_iwm_check(const char *str)
 	if(str) {
 		// Dummy use of argument
 	}
-	iwm_check_nibblization(0.0);
+	iwm_check_nibblization(0);
 }
 
 int
@@ -1387,8 +1599,40 @@ dis_do_memmove()
 void
 dis_do_pattern_search()
 {
-	dbg_printf("Memory pattern search for %04x in %02x/%04x.%04x\n", g_a4,
-						g_a1bank, g_a1, g_a2);
+#if 0
+	word32	match_val, val;
+	int	match_shift, count;
+
+	dbg_printf("Memory pattern search for %04x in %02x/%04x to %02x/%04x\n",
+			g_a4, g_a1bank, g_a1, g_a2bank, g_a2);
+	match_shift = 0;
+	count = 0;
+	match_val = g_a4;
+	while(1) {
+		if(g_a1bank > g_a2bank) {
+			break;
+		}
+		if(g_a1 > g_a2) {
+			break;
+		}
+		val = get_memory_c((g_a1bank << 16) + g_a1);
+		if(val == ((match_val >> match_shift) & 0xff)) {
+			match_shift += 8;
+			if(match_shift >= 16) {
+				dbg_printf("Found %04x at %02x/%04x\n",
+						match_val, g_a1bank, g_a1);
+				count++;
+			}
+		} else {
+			match_shift = 0;
+		}
+		g_a1++;
+		if(g_a1 >= 0x10000) {
+			g_a1 = 0;
+			g_a1bank++;
+		}
+	}
+#endif
 }
 
 void

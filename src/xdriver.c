@@ -1,8 +1,8 @@
-const char rcsid_xdriver_c[] = "@(#)$KmKId: xdriver.c,v 1.232 2022-01-24 02:39:04+00 kentd Exp $";
+const char rcsid_xdriver_c[] = "@(#)$KmKId: xdriver.c,v 1.244 2025-01-07 16:40:09+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2022 by Kent Dickey		*/
+/*			Copyright 2002-2025 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -36,9 +36,6 @@ void _XInitImageFuncPtrs(XImage *xim);
 
 #include "defc.h"
 
-extern word32 g_cycs_in_run_16ms;
-extern word32 g_cycs_in_refresh_ximage;
-extern word32 g_cycs_in_check_input;
 extern int g_video_scale_algorithm;
 extern int g_audio_enable;
 
@@ -51,7 +48,6 @@ typedef struct windowinfo {
 	GC	x_winGC;
 	Atom	delete_atom;
 	int	x_use_shmem;
-	int	x_shift_control_state;
 	int	active;
 	int	width_req;
 	int	pixels_per_line;
@@ -92,12 +88,23 @@ Pixmap	g_cursor_mask;
 XColor	g_xcolor_black = { 0, 0x0000, 0x0000, 0x0000, DoRed|DoGreen|DoBlue, 0 };
 XColor	g_xcolor_white = { 0, 0xffff, 0xffff, 0xffff, DoRed|DoGreen|DoBlue, 0 };
 
+const char *g_x_selection_strings[3] = {
+	// If we get SelectionRequests with target=Atom("TARGETS"), then
+	//  send XA_STRING plus this list to say what we can provide for copy
+	"UTF8_STRING", "text/plain", "text/plain;charset=utf-8"
+};
+
+int	g_x_num_targets = 0;
+Atom g_x_targets_array[5] = { 0 };
+
+Atom g_x_atom_targets = None;		// Will be set to "TARGETS"
+
 int g_depth_attempt_list[] = { 24, 16, 15 };
 
 #define X_EVENT_LIST_ALL_WIN						\
 	(ExposureMask | ButtonPressMask | ButtonReleaseMask |		\
 	OwnerGrabButtonMask | KeyPressMask | KeyReleaseMask |		\
-	KeymapStateMask | ColormapChangeMask | FocusChangeMask)
+	KeymapStateMask | FocusChangeMask)
 
 #define X_BASE_WIN_EVENT_LIST						\
 	(X_EVENT_LIST_ALL_WIN | PointerMotionMask | ButtonMotionMask |	\
@@ -184,7 +191,7 @@ int	g_x_a2_key_to_xsym[][3] = {
 	{ 0x27,	0x27, '"' },	/* single quote */
 	{ 0x24,	XK_Return, 0 },
 	{ 0x56,	XK_KP_4, XK_KP_Left },
-	{ 0x57,	XK_KP_5, 0 },
+	{ 0x57,	XK_KP_5, XK_KP_Begin },
 	{ 0x58,	XK_KP_6, XK_KP_Right },
 	{ 0x45,	XK_KP_Add, 0 },
 
@@ -220,7 +227,6 @@ int	g_x_a2_key_to_xsym[][3] = {
 int
 main(int argc, char **argv)
 {
-	word32	start_time, time1, time2, end_time;
 	int	ret, mdepth;
 
 	ret = parse_argv(argc, argv, 1);
@@ -231,7 +237,7 @@ main(int argc, char **argv)
 
 	mdepth = x_video_get_mdepth();
 
-	ret = kegs_init(mdepth);
+	ret = kegs_init(mdepth, g_x_max_width, g_x_max_height, 0);
 	printf("kegs_init done\n");
 	if(ret) {
 		printf("kegs_init ret: %d, stopping\n", ret);
@@ -239,22 +245,18 @@ main(int argc, char **argv)
 	}
 	x_video_init();
 
+	// This is the main loop of KEGS, when this exits, KEGS exits
+	//  run_16ms() does one video frame worth of instructions and video
+	//  updates: 17030 1MHz clock cycles.
 	while(1) {
-		GET_ITIMER(start_time);
 		ret = run_16ms();
 		if(ret != 0) {
 			printf("run_16ms returned: %d\n", ret);
 			break;
 		}
-		GET_ITIMER(time1);
-		g_cycs_in_run_16ms += (time1 - start_time);
+		x_input_events();
 		x_update_display(&g_mainwin_info);
 		x_update_display(&g_debugwin_info);
-		GET_ITIMER(time2);
-		g_cycs_in_refresh_ximage += (time2 - time1);
-		x_input_events();
-		GET_ITIMER(end_time);
-		g_cycs_in_check_input += (end_time - time2);
 	}
 	xdriver_end();
 	exit(0);
@@ -274,7 +276,6 @@ my_error_handler(Display *display, XErrorEvent *ev)
 void
 xdriver_end()
 {
-
 	printf("xdriver_end\n");
 	if(g_display) {
 		x_auto_repeat_on(1);
@@ -286,7 +287,7 @@ void
 x_try_xset_r()
 {
 	/* attempt "xset r" */
-	(void)system("xset r");
+	(void)!system("xset r");
 	xdriver_end();
 	exit(5);
 }
@@ -448,8 +449,9 @@ void
 x_video_init()
 {
 	int	tmp_array[0x80];
+	Atom	target;
 	char	cursor_data;
-	int	keycode;
+	int	keycode, num_targets, max_targets, num;
 	int	i;
 
 	printf("Opening X Window now\n");
@@ -496,6 +498,23 @@ x_video_init()
 	XFreePixmap(g_display, g_cursor_mask);
 
 	XFlush(g_display);
+	g_x_atom_targets = XInternAtom(g_display, "TARGETS", 0);
+	num = sizeof(g_x_selection_strings)/sizeof(g_x_selection_strings[0]);
+	g_x_targets_array[0] = XA_STRING;
+	num_targets = 1;
+	for(i = 0; i < num; i++) {
+		target = XInternAtom(g_display, g_x_selection_strings[i], 0);
+		if(target != None) {
+			g_x_targets_array[num_targets++] = target;
+		}
+	}
+	g_x_num_targets = num_targets;
+	max_targets = sizeof(g_x_targets_array)/sizeof(g_x_targets_array[0]);
+	if(num_targets > max_targets) {
+		printf("Overflowed g_x_targets_array: %d out of %d\n",
+						num_targets, max_targets);
+		exit(-1);
+	}
 
 	x_init_window(&g_mainwin_info, video_get_kimage(0), "KEGS");
 	x_init_window(&g_debugwin_info, video_get_kimage(1), "KEGS Debugger");
@@ -511,8 +530,8 @@ x_init_window(Window_info *win_info_ptr, Kimage *kimage_ptr, char *name_str)
 {
 	int	width, height, x_use_shmem, ret;
 
-	height = video_get_a2_height(kimage_ptr);
-	width = video_get_a2_width(kimage_ptr);
+	height = video_get_x_height(kimage_ptr);
+	width = video_get_x_width(kimage_ptr);
 
 	win_info_ptr->seginfo = 0;
 	win_info_ptr->xim = 0;
@@ -523,7 +542,6 @@ x_init_window(Window_info *win_info_ptr, Kimage *kimage_ptr, char *name_str)
 	win_info_ptr->delete_atom = 0;
 	win_info_ptr->active = 0;
 	win_info_ptr->x_use_shmem = 0;
-	win_info_ptr->x_shift_control_state = 0;
 	win_info_ptr->width_req = width;
 	win_info_ptr->pixels_per_line = width;
 	win_info_ptr->main_height = height;
@@ -550,7 +568,7 @@ x_init_window(Window_info *win_info_ptr, Kimage *kimage_ptr, char *name_str)
 	win_info_ptr->x_use_shmem = x_use_shmem;
 
 	video_update_scale(kimage_ptr, win_info_ptr->width_req,
-						win_info_ptr->main_height);
+						win_info_ptr->main_height, 1);
 }
 
 void
@@ -561,7 +579,7 @@ x_create_window(Window_info *win_info_ptr)
 	Window	x_win;
 	GC	x_winGC;
 	word32	create_win_list;
-	int	width, height;
+	int	width, height, x_xpos, x_ypos;
 
 	win_attr.event_mask = X_A2_WIN_EVENT_LIST;
 	win_attr.colormap = g_default_colormap;
@@ -580,12 +598,14 @@ x_create_window(Window_info *win_info_ptr)
 	create_win_list = CWEventMask | CWBackingStore | CWCursor;
 	create_win_list |= CWColormap | CWBorderPixel | CWBackPixel;
 
+	x_xpos = video_get_x_xpos(win_info_ptr->kimage_ptr);
+	x_ypos = video_get_x_ypos(win_info_ptr->kimage_ptr);
 	width = win_info_ptr->width_req;
 	height = win_info_ptr->main_height;
 
 	x_win = XCreateWindow(g_display, RootWindow(g_display, g_screen_num),
-		0, 0, width, height, 0, g_x_screen_depth, InputOutput, g_vis,
-		create_win_list, &win_attr);
+		x_xpos, x_ypos, width, height, 0, g_x_screen_depth,
+		InputOutput, g_vis, create_win_list, &win_attr);
 	vid_printf("x_win = %d, width:%d, height:%d\n", (int)x_win, width,
 									height);
 
@@ -643,26 +663,28 @@ xhandle_shm_error(Display *display, XErrorEvent *event)
 void
 x_allocate_window_data(Window_info *win_info_ptr)
 {
+	int	width, height;
+
+	width = g_x_max_width;
+	height = g_x_max_height;
 	if(win_info_ptr->x_use_shmem) {
 		win_info_ptr->x_use_shmem = 0;		// Default to no shmem
-		get_shm(win_info_ptr);
+		get_shm(win_info_ptr, width, height);
 	}
 	if(!win_info_ptr->x_use_shmem) {
-		get_ximage(win_info_ptr);
+		get_ximage(win_info_ptr, width, height);
 	}
 }
 
 void
-get_shm(Window_info *win_info_ptr)
+get_shm(Window_info *win_info_ptr, int width, int height)
 {
 #ifdef X_SHARED_MEM
 	XShmSegmentInfo *seginfo;
 	XImage *xim;
 	int	(*old_x_handler)(Display *, XErrorEvent *);
-	int	width, height, depth, size;
+	int	depth, size;
 
-	width = g_x_max_width;
-	height = g_x_max_height;
 	depth = g_x_screen_depth;		// 24, actual bits per pixel
 
 	seginfo = (XShmSegmentInfo *)malloc(sizeof(XShmSegmentInfo));
@@ -742,14 +764,12 @@ get_shm(Window_info *win_info_ptr)
 }
 
 void
-get_ximage(Window_info *win_info_ptr)
+get_ximage(Window_info *win_info_ptr, int width, int height)
 {
 	XImage	*xim;
 	byte	*ptr;
-	int	width, height, depth, mdepth, size;
+	int	depth, mdepth, size;
 
-	width = g_x_max_width;
-	height = g_x_max_height;
 	depth = g_x_screen_depth;
 	mdepth = g_x_screen_mdepth;
 
@@ -803,7 +823,7 @@ x_set_size_hints(Window_info *win_info_ptr)
 	width = win_info_ptr->width_req;
 	height = win_info_ptr->main_height;
 	kimage_ptr = win_info_ptr->kimage_ptr;
-	video_update_scale(kimage_ptr, width, height);
+	video_update_scale(kimage_ptr, width, height, 0);
 
 	a2_width = video_get_a2_width(kimage_ptr);
 	a2_height = video_get_a2_height(kimage_ptr);
@@ -826,6 +846,7 @@ x_set_size_hints(Window_info *win_info_ptr)
 
 	XSetWMProperties(g_display, win_info_ptr->x_win, &my_winText,
 		&my_winText, 0, 0, &my_winSizeHints, 0, &my_winClassHint);
+	// printf("Did XSetWMProperties w:%d h:%d\n", width, height);
 }
 
 void
@@ -841,8 +862,6 @@ x_resize_window(Window_info *win_info_ptr)
 	win_info_ptr->main_height = MY_MIN(x_height, g_x_max_height);
 	win_info_ptr->width_req = MY_MIN(x_width, g_x_max_width);
 
-	x_set_size_hints(win_info_ptr);
-
 	ret = XResizeWindow(g_display, win_info_ptr->x_win, x_width, x_height);
 	if(0) {
 		printf("XResizeWindow ret:%d, w:%d, h:%d\n", ret, x_width,
@@ -854,14 +873,10 @@ void
 x_update_display(Window_info *win_info_ptr)
 {
 	Change_rect rect;
-	int	did_copy, valid, x_active, a2_active, x_height;
+	int	did_copy, valid, x_active, a2_active;
 	int	i;
 
 	// Update active state
-	x_height = video_get_x_height(win_info_ptr->kimage_ptr);
-	if(x_height != win_info_ptr->main_height) {
-		x_resize_window(win_info_ptr);
-	}
 	a2_active = video_get_active(win_info_ptr->kimage_ptr);
 	x_active = win_info_ptr->active;
 	if(x_active && !a2_active) {
@@ -881,6 +896,11 @@ x_update_display(Window_info *win_info_ptr)
 	}
 	if(x_active == 0) {
 		return;
+	}
+
+	if(video_change_aspect_needed(win_info_ptr->kimage_ptr,
+			win_info_ptr->width_req, win_info_ptr->main_height)) {
+		x_resize_window(win_info_ptr);
 	}
 	did_copy = 0;
 	for(i = 0; i < MAX_CHANGE_RECTS; i++) {
@@ -942,6 +962,51 @@ x_find_xwin(Window in_win)
 int g_num_check_input_calls = 0;
 int g_check_input_flush_rate = 2;
 
+// https://stackoverflow.com/questions/72236711/trouble-with-xsetselectionowner
+//  See answer from "n.m" on May 17th.
+void
+x_send_copy_data(Window_info *win_info_ptr)
+{
+	printf("x_send_copy_data!\n");
+	XSetSelectionOwner(g_display, XA_PRIMARY, win_info_ptr->x_win,
+							CurrentTime);
+	(void)cfg_text_screen_str();
+}
+
+void
+x_handle_copy(XSelectionRequestEvent *req_ev_ptr)
+{
+	byte	*bptr;
+	int	ret;
+
+	bptr = (byte *)cfg_get_current_copy_selection();
+	ret = XChangeProperty(g_display, req_ev_ptr->requestor,
+		req_ev_ptr->property, req_ev_ptr->target, 8,
+		PropModeReplace, bptr, strlen((char *)bptr));
+		// req_ev_ptr->target is either XA_STRING, or equivalent
+	if(0) {
+		// Seems to return 1, BadRequest always, but it works
+		printf("XChangeProperty ret: %d\n", ret);
+	}
+}
+
+void
+x_handle_targets(XSelectionRequestEvent *req_ev_ptr)
+{
+	int	ret;
+
+	// Tell the other client what targets we can supply from
+	//  g_x_targets_array[]
+	ret = XChangeProperty(g_display, req_ev_ptr->requestor,
+		req_ev_ptr->property, XA_ATOM, 32,
+		PropModeReplace, (byte *)&g_x_targets_array[0],
+		g_x_num_targets);
+	if(0) {
+		// Seems to return 1, BadRequest always, but it works
+		printf("XChangeProperty TARGETS ret: %d\n", ret);
+	}
+}
+
 void
 x_request_paste_data(Window_info *win_info_ptr)
 {
@@ -982,19 +1047,10 @@ x_handle_paste(Window w, Atom property)
 		//printf("bptr: %s\n", (char *)bptr);
 		for(i = 0; i < sel_nitems; i++) {
 			c = bptr[i];
-			if(c == 10) {
-				c = 13;		// newline -> return
-			} else if((c == 9) || (c == 13)) {
-				// Allow these unchanged
-			} else if(c < 32) {
-				c = 0;
-			}
-			if((c > 0) && (c < 0x7f)) {
-				ret2 = adb_paste_add_buf(c);
-				if(ret2) {
-					printf("Paste buffer full!\n");
-					break;
-				}
+			ret2 = adb_paste_add_buf(c);
+			if(ret2) {
+				printf("Paste buffer full!\n");
+				break;
 			}
 		}
 	}
@@ -1033,11 +1089,21 @@ x_update_mouse(Window_info *win_info_ptr, int raw_x, int raw_y,
 void
 x_input_events()
 {
-	XEvent	ev;
+	XEvent	ev, response;
+	XSelectionRequestEvent *req_ev_ptr;
 	Window_info *win_info_ptr;
+	char	*str;
 	int	len, motion, key_or_mouse, refresh_needed, buttons, hide, warp;
-	int	width, height;
+	int	width, height, resp_property, match, x_xpos, x_ypos;
+	int	i;
 
+	str = 0;
+	if(str) {
+		// Use str
+	}
+	if(adb_get_copy_requested()) {
+		x_send_copy_data(&g_mainwin_info);
+	}
 	g_num_check_input_calls--;
 	if(g_num_check_input_calls < 0) {
 		len = XPending(g_display);
@@ -1108,6 +1174,7 @@ x_input_events()
 		case Expose:
 			win_info_ptr = x_find_xwin(ev.xexpose.window);
 			refresh_needed = -1;
+			//printf("Got an Expose event\n");
 			break;
 		case NoExpose:
 			/* do nothing */
@@ -1119,13 +1186,14 @@ x_input_events()
 			break;
 		case KeymapNotify:
 			break;
-		case ColormapNotify:
-			break;
 		case DestroyNotify:
 			win_info_ptr = x_find_xwin(ev.xdestroywindow.window);
 			video_set_active(win_info_ptr->kimage_ptr, 0);
 			win_info_ptr->active = 0;
 			printf("Destroy %s\n", win_info_ptr->name_str);
+			if(win_info_ptr == &g_mainwin_info) {
+				x_try_xset_r();		// Mainwin: quit BURST
+			}
 			break;
 		case ReparentNotify:
 		case UnmapNotify:
@@ -1142,7 +1210,7 @@ x_input_events()
 			}
 			break;
 		case ConfigureNotify:
-			win_info_ptr = x_find_xwin(ev.xmotion.window);
+			win_info_ptr = x_find_xwin(ev.xconfigure.window);
 			width = ev.xconfigure.width;
 			height = ev.xconfigure.height;
 #if 0
@@ -1150,7 +1218,59 @@ x_input_events()
 				width, height);
 #endif
 			video_update_scale(win_info_ptr->kimage_ptr, width,
-								height);
+								height, 0);
+			x_xpos = ev.xconfigure.x;
+			x_ypos = ev.xconfigure.y;
+			video_update_xpos_ypos(win_info_ptr->kimage_ptr,
+							x_xpos, x_ypos);
+			break;
+		case SelectionRequest:
+			//printf("SelectionRequest received\n");
+			req_ev_ptr = &(ev.xselectionrequest);
+			// This is part of the dance for copy: Another client
+			//  is asking us what format we can supply (TARGETS),
+			//  or is doing to tell us one at a time what types
+			//  it would like.
+#if 0
+			printf("req:%ld, property:%ld, target:%ld, "
+				"selection:%ld\n", req_ev_ptr->requestor,
+				req_ev_ptr->property, req_ev_ptr->target,
+				req_ev_ptr->selection);
+			str = XGetAtomName(g_display, req_ev_ptr->target);
+			printf("XAtom target str: %s\n", str);
+			XFree(str);
+			str = XGetAtomName(g_display, req_ev_ptr->property);
+			printf("XAtom property str: %s\n", str);
+			XFree(str);
+#endif
+			resp_property = None;
+			match = 0;
+			for(i = 0; i < g_x_num_targets; i++) {
+				if(req_ev_ptr->target == g_x_targets_array[i]) {
+					match = 1;
+					break;
+				}
+			}
+			if(match) {
+				x_handle_copy(req_ev_ptr);
+				resp_property = req_ev_ptr->property;
+			} else if(req_ev_ptr->target == g_x_atom_targets) {
+				// Some other agent is asking us "TARGETS",
+				//  so send our list of targets
+				x_handle_targets(req_ev_ptr);
+			}
+			// But no matter what the request target was, respond
+			//  so it will send an eventual request for XA_STRING
+			response.xselection.type = SelectionNotify;
+			response.xselection.display = req_ev_ptr->display;
+			response.xselection.requestor = req_ev_ptr->requestor;
+			response.xselection.selection = req_ev_ptr->selection;
+			response.xselection.target = req_ev_ptr->target;
+			response.xselection.property = resp_property;
+			response.xselection.time = req_ev_ptr->time;
+			XSendEvent(g_display, req_ev_ptr->requestor, 0, 0,
+								&response);
+			XFlush(g_display);	// Speed up getting more resp
 			break;
 		case SelectionNotify:
 			// We get this event after we requested the PRIMARY
@@ -1200,6 +1320,7 @@ x_input_events()
 	}
 
 	if(refresh_needed && win_info_ptr) {
+		//printf("...at end, refresh_needed:%d\n", refresh_needed);
 		video_set_x_refresh_needed(win_info_ptr->kimage_ptr, 1);
 	}
 
@@ -1258,10 +1379,6 @@ x_handle_keysym(XEvent *xev_in)
 		keysym = XK_Scroll_Lock;	/* cmd */
 		break;
 	case XK_F5:
-		if(!is_up) {
-			video_set_x_refresh_needed(win_info_ptr->kimage_ptr, 1);
-			printf("g_x_refresh_needed = 1\n");
-		}
 		break;
 	case XK_F10:
 		if(!is_up) {
@@ -1271,10 +1388,9 @@ x_handle_keysym(XEvent *xev_in)
 			}
 			printf("g_video_scale_algorithm = %d\n",
 						g_video_scale_algorithm);
-			video_set_x_refresh_needed(win_info_ptr->kimage_ptr, 1);
 			video_update_scale(win_info_ptr->kimage_ptr,
 					win_info_ptr->width_req,
-					win_info_ptr->main_height);
+					win_info_ptr->main_height, 1);
 		}
 		break;
 	case 0x1000003:
@@ -1320,10 +1436,7 @@ x_handle_keysym(XEvent *xev_in)
 	a2code = x_keysym_to_a2code(win_info_ptr, (int)keysym, is_up);
 	if(a2code >= 0) {
 		adb_physical_key_update(win_info_ptr->kimage_ptr, a2code,
-			0, is_up,
-			win_info_ptr->x_shift_control_state & ShiftMask,
-			win_info_ptr->x_shift_control_state & ControlMask,
-			win_info_ptr->x_shift_control_state & LockMask);
+			0, is_up);
 	} else if(a2code != -2) {
 		printf("Keysym: %04x of keycode: %02x unknown\n",
 			(word32)keysym, keycode);
@@ -1333,27 +1446,10 @@ x_handle_keysym(XEvent *xev_in)
 int
 x_keysym_to_a2code(Window_info *win_info_ptr, int keysym, int is_up)
 {
-	word32	mask;
 	int	i;
 
 	if(keysym == 0) {
 		return -1;
-	}
-
-	mask = 0;
-	if((keysym == XK_Shift_L) || (keysym == XK_Shift_R)) {
-		mask = ShiftMask;
-	}
-	if(keysym == XK_Caps_Lock) {
-		mask = LockMask;
-	}
-	if((keysym == XK_Control_L) || (keysym == XK_Control_R)) {
-		mask = ControlMask;
-	}
-	if(is_up) {
-		win_info_ptr->x_shift_control_state &= ~mask;
-	} else {
-		win_info_ptr->x_shift_control_state |= mask;
 	}
 
 	/* Look up Apple 2 keycode */
@@ -1375,32 +1471,19 @@ x_keysym_to_a2code(Window_info *win_info_ptr, int keysym, int is_up)
 void
 x_update_modifier_state(Window_info *win_info_ptr, int state)
 {
-	word32	state_xor, shift_down, ctrl_down, lock_down;
-	int	is_up;
+	word32	c025_val;
 
-	state = state & (ControlMask | LockMask | ShiftMask);
-	state_xor = win_info_ptr->x_shift_control_state ^ state;
-	is_up = 0;
-	shift_down = state & ShiftMask;
-	ctrl_down = state & ControlMask;
-	lock_down = state & LockMask;
-	if(state_xor & ControlMask) {
-		is_up = ((state & ControlMask) == 0);
-		adb_physical_key_update(win_info_ptr->kimage_ptr, 0x36, 0,
-				is_up, shift_down, ctrl_down, lock_down);
+	c025_val = 0;
+	if(state & ShiftMask) {
+		c025_val |= 1;
 	}
-	if(state_xor & LockMask) {
-		is_up = ((state & LockMask) == 0);
-		adb_physical_key_update(win_info_ptr->kimage_ptr, 0x39, 0,
-				is_up, shift_down, ctrl_down, lock_down);
+	if(state & ControlMask) {
+		c025_val |= 2;
 	}
-	if(state_xor & ShiftMask) {
-		is_up = ((state & ShiftMask) == 0);
-		adb_physical_key_update(win_info_ptr->kimage_ptr, 0x38, 0,
-				is_up, shift_down, ctrl_down, lock_down);
+	if(state & LockMask) {
+		c025_val |= 4;
 	}
-
-	win_info_ptr->x_shift_control_state = state;
+	adb_update_c025_mask(win_info_ptr->kimage_ptr, c025_val, 7);
 }
 
 void

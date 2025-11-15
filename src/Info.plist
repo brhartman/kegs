@@ -8,6 +8,8 @@
 	<string>en</string>
 	<key>CFBundleExecutable</key>
 	<string>KEGSMAC</string>
+	<key>CFBundleIconFile</key>
+	<string>kegs.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.provalid.Kegs</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -17,7 +19,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
+	<string>1.38</string>
 	<key>CFBundleSupportedPlatforms</key>
 	<array>
 		<string>MacOSX</string>
@@ -41,9 +43,9 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>10.13</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2021 Kent Dickey. All rights reserved.</string>
+	<string>Copyright © 2025 Kent Dickey. All rights reserved.</string>
 	<key>NSHighResolutionCapable</key>
-	<false/>
+	<true/>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>

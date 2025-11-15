@@ -1,8 +1,8 @@
-const char rcsid_clock_c[] = "@(#)$KmKId: clock.c,v 1.36 2020-06-14 02:49:53+00 kentd Exp $";
+const char rcsid_clock_c[] = "@(#)$KmKId: clock.c,v 1.40 2023-09-23 17:51:22+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2019 by Kent Dickey		*/
+/*			Copyright 2002-2022 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -22,7 +22,7 @@ const char rcsid_clock_c[] = "@(#)$KmKId: clock.c,v 1.36 2020-06-14 02:49:53+00 
 #endif
 
 extern int Verbose;
-extern int g_vbl_count;
+extern word32 g_vbl_count;
 extern int g_rom_version;
 extern int g_config_kegs_update_needed;
 
@@ -36,8 +36,8 @@ int	g_clk_mode = CLK_IDLE;
 int	g_clk_read = 0;
 int	g_clk_reg1 = 0;
 
-extern int g_c033_data;
-extern int g_c034_val;
+extern word32 g_c033_data;
+extern word32 g_c034_val;
 
 byte	g_bram[2][256];
 byte	*g_bram_ptr = &(g_bram[0][0]);
@@ -48,7 +48,11 @@ int	g_clk_next_vbl_update = 0;
 double
 get_dtime()
 {
-#ifndef _WIN32
+
+#ifdef _WIN32
+	FILETIME filetime;
+	dword64	dlow, dhigh;
+#else
 	struct timeval tp1;
 	double	dsec;
 	double	dusec;
@@ -60,7 +64,13 @@ get_dtime()
 	/*  take advantage of that in future to increase usec accuracy */
 
 #ifdef _WIN32
-	dtime = timeGetTime() / 1000.0;
+	//dtime = timeGetTime() / 1000.0;
+	GetSystemTimePreciseAsFileTime(&filetime);
+	dlow = filetime.dwLowDateTime;
+	dhigh = filetime.dwHighDateTime;
+	dlow = (dhigh << 32) | dlow;
+	dtime = (double)dlow;
+	dtime = dtime / (1000*1000*10.0);	// FILETIME is in 100ns incs
 #else
 
 # ifdef SOLARIS
@@ -99,7 +109,7 @@ micro_sleep(double dtime)
 #endif
 
 #ifdef _WIN32
-	Sleep(dtime * 1000);
+	Sleep((word32)(dtime * 1000));
 #else
 	Timer.tv_sec = 0;
 	Timer.tv_usec = (dtime * 1000000.0);
@@ -171,8 +181,7 @@ void
 update_cur_time()
 {
 	struct tm *tm_ptr;
-	time_t	cur_time;
-	unsigned long secs, secs2;
+	time_t	cur_time, secs, secs2;
 
 	cur_time = time(0);
 
@@ -183,13 +192,14 @@ update_cur_time()
 	tm_ptr = localtime(&cur_time);
 	secs = mktime(tm_ptr);
 
+	secs2 = secs2 - secs;		// this is the timezone offset
 #ifdef MAC
 	/* Mac OS X's mktime function modifies the tm_ptr passed in for */
 	/*  the CDT timezone and breaks this algorithm.  So on a Mac, we */
 	/*  will use the tm_ptr->gmtoff member to correct the time */
 	secs = secs + tm_ptr->tm_gmtoff;
 #else
-	secs = (unsigned long)cur_time - (secs2 - secs);
+	secs = cur_time - secs2;
 
 	if(tm_ptr->tm_isdst) {
 		/* adjust for daylight savings time */
@@ -244,9 +254,7 @@ clock_write_c034(word32 val)
 void
 do_clock_data()
 {
-	word32	mask;
-	int	read;
-	int	op;
+	word32	mask, read, op;
 
 	clk_printf("In do_clock_data, g_clk_mode: %02x\n", g_clk_mode);
 

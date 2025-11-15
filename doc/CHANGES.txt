@@ -1,4 +1,187 @@
 
+Changes in KEGS v1.38 since v1.35 (04/29/25)
+- Improve serial port handling so BBS'es like GBBS and Warp6 run.
+- Fix a crash reported by Tom Charlesworth where resizing the Debugger
+	window would crash on Windows.
+- Fix a timing anomaly also reported by Tom Charlesworth where 3- and 4-byte
+	instructions just before a page crossing would take too many cycles
+	to execute.
+- Add Alex Lee's icon on the Mac.
+
+Changes in KEGS v1.35 since v1.34 (01/07/25)
+- Fix handling of .zip files, it somehow got broken so subdirectories in
+	zip files weren't selectable.
+- DCD fixes for the virtual modem, and fix CONNECT terse response code to
+	try to support the Warp6 BBS.
+
+
+Changes in KEGS v1.34 since v1.33 (01/15/24)
+- Fix bug where no config.kegs file could sometimes cause a crash.
+- Richard Bennett fixes:  Change menus to be retina, and add About dialog on
+	a Mac
+- Save the main window size and position in config.kegs (but not automatically)
+
+
+Changes in KEGS v1.33 since v1.32 (12/10/23)
+- Add command line argument support to set any disk (-s5d1=Data.po
+	or -s7d12 bigdisk.hdv) or any knob that is listed in config.kegs.
+- Add -cfg path_and_name_of_config_kegs file to use a particular config.kegs
+	file.
+- Fix Code Red when leaving the configuration screen (F4) using the last
+	menu item "Exit Config".
+- Allow pasting of control-characters such as Ctrl-D and Ctrl-H.
+
+
+Changes in KEGS v1.32 since v1.31 (11/22/23)
+- Fix (dloc,x) in emulation mode to wrap as described at
+	https://github.com/gilyon/snes-tests/tree/main/cputest
+- Improve virtual hard drive in slot 7 to use a small driver at $C700 which
+	uses WDM $C7,$00 to call back to KEGS for handling commands.
+- Improve SCC8530 emulation to add support for RTxC as clock for higher speeds.
+- Fix a GS/OS visual anomaly with the mouse cursor sometimes disappearing
+	when moving upwards, due to Scanline interrupts not being taken
+	properly.
+- Support qkumba's code to run from $C050 by having get_remaing_opcodes()
+	track time properly, and to have reads to $C050-$C057 call float_bus()
+	before doing the softswitch action.
+
+
+Changes in KEGS v1.31 since v1.30 (11/04/23)
+- Fix Windows failure where KEGS would quit on startup if config.kegs
+	contained a new ROM path.
+- Fix a Code Red halt running the Printer57.6 driver where KEGS thought it
+	might need to generate a baud rate event every .5 cycles.
+- Fix disk image selection screen bug where s7d10-s7d12 could wrap and make
+	it hard to leave the screen.
+- Add a Slinky RAM card in slot 4 (with no firmware), works even with
+	Mockingboard.
+- Fix scanline interrupts which were happening too early starting with
+	version 1.24.
+- Another false read bug was causing 16-bit RMW cycles to read the next
+	address (which is incorrect).
+
+
+Changes in KEGS v1.30 since v1.29 (09/23/23)
+- Proper emulation of the $C080-$C08F language card soft switches.
+- Improved INTC8ROM emulation, so a2audit passes (with Apple //e ROMs)
+- Fix SCC RR2B register emulation for Colin Leroy-Mira's telnet.system.
+- Fix SCC remote IP mode to restart the connection if the remote side ended
+	it due to idleness, to better handle connecting to printers.
+- RAMRD/RAMWRT/ST80COL/etc. apply to bank $E0 as well as to bank $00.  This
+	was not emulated properly before.  This fixes the AppleLink Terminal
+	application.
+
+
+Changes in KEGS v1.29 since v1.28 (09/05/23)
+- Improved disk arm emulation for 5.25" disks
+- Enable use of a real serial port on Linux, and improve real serial port
+	emulation on Mac.
+- Add serial "outgoing IP" to allow slot 1 serial to be sent directly to
+	a real printer (often port 9100).
+- When mounting an image from a .zip file, you can press Cmd-A and all
+	subsequent images will also be mounted in consecutive drives.
+	This is useful for the new wita2gs_0_70.zip.
+- Allow "unlocking" locked images from .zip files, to allow code to write to
+	them (but it's all in memory, so all changes are lost when KEGS
+	exits).
+- Fix DiskCopy4.2 image detection, to handle images of sizes other than 800KB.
+
+
+Changes in KEGS v1.28 since v1.27 (06/21/23)
+- Reduce status lines under the window from 7 lines of text to 4.
+- Fix Windows10 crash when KEGS was minimized (Windows set the window size to
+	0, which was unexpected, and led to a divide-by-0).
+- Enable live window resizing on Windows64.  Speed up the video scaling for
+	X11 and Windows.
+- Allow the ZipGS speed, which was fixed at 8MHz previously), be set to
+	8MHz, 16MHz, 32MHz, 64MHz, or 128MHz.
+- Fix a false read bug which broke SCC emulation.  LDA $BFFD,X where X=$3D
+	was "false" reading $C039, not $BF39 as it should, leading to SCC
+	state being incorrect.
+
+
+Changes in KEGS v1.27 since v1.26 (06/13/23)
+- Ignore WDM 0xfc,0xfd,0xff to avoid HOST.FST causing Code Red.
+- Fix $C019 reading to match Deater's Midline demo
+- Add false reads for RMW instruction, (dloc),y, abs,x, and abs,y modes.
+	Only 8-bit false reads are done currently (this only affect 16-bit
+	RMW, where I know of nothing using the false reads).
+- Fix reported bug where long paths in the file selection screens didn't
+	truncate the files so the endings could always be seen.
+- Allow 140K .SDK images to be selected in the image file selection screen.
+- Fix $C030 speaker toggle emulation to eliminate a 60-Hertz buzz caused by
+	the code being organized around 60Hz screen refresh and not counting
+	on the last toggle correctly in each video frame in all cases.  The
+	$C030 speaker output ramps down to 0 after about 60msec to avoid the
+	annoying "click" 4 seconds later when KEGS pauses sound output.
+
+
+Changes in KEGS v1.26 since v1.25 (05/22/23)
+- Fix Win64 Dynapro issues (O_BINARY, setvbuf was causing a crash).
+- Fix a KEGS bug in the Bank $E0 memory map which could corrupt data in the
+	Apple IIgs memory from $E0/6000 - $E0/A000 introduced in KEGS 1.20.
+
+
+Changes in KEGS v1.25 since v1.24 (05/21/23)
+- Actual Win32 support.  1.24 was only Win64.
+
+
+Changes in KEGS v1.24 since v1.23 (05/17/23)
+- Win64 support.  kegswin.exe now part of the standard release.  The Windows
+	port is still beta quality.
+- Try to fix jerky video to make KEGS seem smoother.
+
+
+Changes in KEGS v1.23 since v1.22 (05/05/23)
+- Change the way KEGS tracks time from a double to a unsigned long long,
+	which enables higher speeds.
+- Support video mode changes in the middle of lines.
+
+
+Changes in KEGS v1.22 since v1.21 (04/27/23)
+- Remove debugging printfs from iwm.c.
+- Fix the way video updates are done to fix Dagen Brock's HDGR demo (which
+	switches pages to double the GR vertical resolution).
+
+
+Changes in KEGS v1.21 since v1.20 (04/15/23)
+- Fix Antoine's reported issue where KEGS would hang after ejecting 3.5" disks.
+	Caused by a debug statement accidentally left in for the release.
+- Fix Stephan's reported issue with keys repeating forever with French
+	keyboards.
+
+
+Changes in KEGS v1.20 since v1.19 (03/31/23)
+- Ctrl-F9 is now Copy.  The text screen is copied to your host system
+	clipboard.  On a Mac, Edit->Copy Text Screen can be selected, too.
+- Fix Mockingboard emulation to pass mb-audit.1.3 (it was a reset-related
+	issue).
+- Fix VOC support for unreleased "Fat Screen" VOC SHR from main-memory to
+	work properly.
+
+
+Changes in KEGS v1.19 since v1.18 (03/11/23)
+- 'L' on the disk selection screen locks/unlocks images.
+- Ignore case when detecting image extensions like .PO.
+- Allow setting ROM image on command line: -rom=/path/to/rom/file
+- Big changes to disk emulation for better WOZ image compability.
+	Writing to WOZ images works properly now, recalculating CRC correctly.
+	Automatically changes a floppy disk image to .WOZ if writing to the
+	image makes it no longer a standard format.  User can rename image to
+	save the new .WOZ changes.
+
+
+Changes in KEGS v1.18 since v1.17 (02/09/22)
+- Alpha version of KEGSWIN, KEGS can now run on Windows 10 or later.
+	(No binary yet)
+
+
+Changes in KEGS v1.17 since v1.16 (02/09/22)
+- Implement $C02C "Test Mode" reading of the character ROM.  This enables
+	SuperConvert 4 TDM conversions to work properly.
+- Add Video->Swap Command/Option menu item to support Windows keyboards better.
+
+
 Changes in KEGS v1.16 since v1.14 (01/23/22)
 - Better cursor focus tracking, less likely to have an invisible cursor
 	when KEGS is no longer the active window.

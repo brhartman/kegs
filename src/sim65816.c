@@ -1,8 +1,8 @@
-const char rcsid_sim65816_c[] = "@(#)$KmKId: sim65816.c,v 1.436 2021-12-20 18:33:08+00 kentd Exp $";
+const char rcsid_sim65816_c[] = "@(#)$KmKId: sim65816.c,v 1.491 2025-04-27 18:03:43+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2021 by Kent Dickey		*/
+/*			Copyright 2002-2025 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -37,22 +37,22 @@ extern char *g_argv0_path;
 
 extern int g_stepping;
 
-extern int g_c068_statereg;
+extern word32 g_c068_statereg;
 extern int g_cur_a2_stat;
 
-extern int g_c08x_wrdefram;
-extern int g_c02d_int_crom;
+extern word32 g_c02d_int_crom;
 
-extern int g_c035_shadow_reg;
-extern int g_c036_val_speed;
+extern word32 g_c035_shadow_reg;
+extern word32 g_c036_val_speed;
 
-extern int g_c023_val;
-extern int g_c041_val;
-extern int g_c046_val;
-extern int g_zipgs_reg_c059;
-extern int g_zipgs_reg_c05a;
-extern int g_zipgs_reg_c05b;
-extern int g_zipgs_unlock;
+extern word32 g_c023_val;
+extern word32 g_c041_val;
+extern word32 g_c046_val;
+extern word32 g_zipgs_reg_c059;
+extern word32 g_zipgs_reg_c05a;
+extern word32 g_zipgs_reg_c05b;
+extern word32 g_zipgs_unlock;
+extern Iwm g_iwm;
 
 Engine_reg engine;
 extern word32 table8[];
@@ -63,15 +63,13 @@ extern byte doc_ram[];
 extern int g_iwm_motor_on;
 extern int g_fast_disk_emul;
 extern int g_slow_525_emul_wr;
-extern int g_c031_disk35;
 extern int g_config_control_panel;
 
 extern int g_audio_enable;
 extern int g_preferred_rate;
 
 int	g_a2_fatal_err = 0;
-double	g_fcycles_end = 0.0;
-int	g_fcycles_end_for_event = 0;
+dword64	g_dcycles_end = 0;
 int	g_halt_sim = 0;
 int	g_rom_version = -1;
 int	g_user_halt_bad = 0;
@@ -81,20 +79,15 @@ int	g_ignore_halts = 1;
 int	g_code_red = 0;
 int	g_code_yellow = 0;
 int	g_emul_6502_ind_page_cross_bug = 0;
-int	g_use_alib = 0;
-int	g_raw_serial = 1;
-int	g_iw2_emul = 0;
-int	g_serial_out_masking = 0;
-int	g_serial_modem[2] = { 0, 1 };
 
 int	g_config_iwm_vbl_count = 0;
-const char g_kegs_version_str[] = "1.16";
+const char g_kegs_version_str[] = "1.38";
 
-double	g_last_vbl_dcycs = 0.0;
-double	g_cur_dcycs = 0.0001;
+dword64	g_last_vbl_dfcyc = 0;
+dword64	g_cur_dfcyc = 1;
 
-double	g_last_vbl_dadjcycs = 0.0;
-double	g_dadjcycs = 0.0;
+double	g_last_vbl_dadjcycs = 0;
+double	g_dadjcycs = 0;
 
 
 int	g_wait_pending = 0;
@@ -128,9 +121,9 @@ word32 g_natcycs_lastvbl = 0;
 int Verbose = 0;
 int Halt_on = 0;
 
-word32 g_mem_size_base = 256*1024;	/* size of motherboard memory */
+word32 g_mem_size_base = 128*1024;	/* size of motherboard memory */
 word32 g_mem_size_exp = 8*1024*1024;	/* size of expansion RAM card */
-word32 g_mem_size_total = 256*1024;	/* Total contiguous RAM from 0 */
+word32 g_mem_size_total = 128*1024;	/* Total contiguous RAM from 0 */
 
 extern word32 g_slow_mem_changed[];
 
@@ -150,25 +143,12 @@ int	g_use_shmem = 1;
 
 extern word32 g_cycs_in_40col;
 extern word32 g_cycs_in_xredraw;
-extern word32 g_cycs_in_check_input;
 extern word32 g_cycs_in_refresh_line;
-extern word32 g_cycs_in_refresh_ximage;
-extern word32 g_cycs_in_run_16ms;
 extern word32 g_cycs_outside_run_16ms;
-extern word32 g_cycs_in_sound1;
-extern word32 g_cycs_in_sound2;
-extern word32 g_cycs_in_sound3;
-extern word32 g_cycs_in_sound4;
-extern word32 g_cycs_in_start_sound;
-extern word32 g_cycs_in_est_sound;
 extern word32 g_refresh_bytes_xfer;
 
 extern int g_num_snd_plays;
-extern int g_num_doc_events;
-extern int g_num_start_sounds;
-extern int g_num_scan_osc;
 extern int g_num_recalc_snd_parms;
-extern float g_fvoices;
 
 extern int g_doc_vol;
 
@@ -216,14 +196,15 @@ toolbox_debug_4byte(word32 addr)
 }
 
 void
-toolbox_debug_c(word32 xreg, word32 stack, double *cyc_ptr)
+toolbox_debug_c(word32 xreg, word32 stack, dword64 *dcyc_ptr)
 {
 	int	pos;
 
 	pos = g_toolbox_log_pos;
 
 	stack += 9;
-	g_toolbox_log_array[pos][0] = g_last_vbl_dcycs + *cyc_ptr;
+	g_toolbox_log_array[pos][0] = (word32)
+					((g_last_vbl_dfcyc + *dcyc_ptr) >> 16);
 	g_toolbox_log_array[pos][1] = stack+1;
 	g_toolbox_log_array[pos][2] = xreg;
 	g_toolbox_log_array[pos][3] = toolbox_debug_4byte(stack+1);
@@ -267,7 +248,7 @@ show_toolbox_log()
 }
 
 word32
-get_memory_io(word32 loc, double *cyc_ptr)
+get_memory_io(word32 loc, dword64 *dcyc_ptr)
 {
 	int	tmp;
 
@@ -278,7 +259,7 @@ get_memory_io(word32 loc, double *cyc_ptr)
 
 	tmp = loc & 0xfef000;
 	if(tmp == 0xc000 || tmp == 0xe0c000) {
-		return(io_read(loc & 0xfff, cyc_ptr));
+		return(io_read(loc & 0xfff, dcyc_ptr));
 	}
 
 	/* Else it's an illegal addr...skip if memory sizing */
@@ -321,13 +302,13 @@ get_memory_io(word32 loc, double *cyc_ptr)
 }
 
 void
-set_memory_io(word32 loc, int val, double *cyc_ptr)
+set_memory_io(word32 loc, int val, dword64 *dcyc_ptr)
 {
 	word32	tmp;
 
 	tmp = loc & 0xfef000;
 	if(tmp == 0xc000 || tmp == 0xe0c000) {
-		io_write(loc, val, cyc_ptr);
+		io_write(loc, val, dcyc_ptr);
 		return;
 	}
 
@@ -384,8 +365,8 @@ show_regs_act(Engine_reg *eptr)
 
 	dbg_printf("  PC=%02x.%04x A=%04x X=%04x Y=%04x P=%03x",
 		kpc>>16, kpc & 0xffff ,tmp_acc,tmp_x,tmp_y,tmp_psw);
-	dbg_printf(" S=%04x D=%04x B=%02x,cyc:%.3f\n", stack, direct_page,
-		dbank, g_cur_dcycs);
+	dbg_printf(" S=%04x D=%04x B=%02x,cyc:%016llx\n", stack, direct_page,
+		dbank, g_cur_dfcyc);
 }
 
 void
@@ -405,15 +386,12 @@ my_exit(int ret)
 void
 do_reset()
 {
-
 	g_c035_shadow_reg = 0;
 
-	g_c08x_wrdefram = 1;
-	if(g_rom_version == 0) {
-		g_c068_statereg = 0x08 + 0x04;	/* rdrom, lcbank2 */
-		g_c02d_int_crom = 0xff;
-	} else {
-		g_c068_statereg = 0x08 + 0x04 + 0x01; /* rdrom, lcbank2, intcx*/
+	g_c068_statereg = 0x200 | 0x08 | 0x04;	// Set wrdefram, rdrom, lcbank2
+	g_c02d_int_crom = 0xff;
+	if(g_rom_version != 0) {		// IIgs ROM01 or ROM03
+		g_c068_statereg |= 0x01;	// also set intcx
 		g_c02d_int_crom = 0;
 	}
 	g_c023_val = 0;
@@ -428,21 +406,21 @@ do_reset()
 	g_wait_pending = 0;
 	g_stp_pending = 0;
 
-
 	video_reset();
 	adb_reset();
 	iwm_reset();
 	scc_reset();
-	sound_reset(g_cur_dcycs);
+	sound_reset(g_cur_dfcyc);
 	setup_pageinfo();
-	change_display_mode(g_cur_dcycs);
+	change_display_mode(g_cur_dfcyc);
 
 	g_irq_pending = 0;
+	g_code_yellow = 0;
+	g_code_red = 0;
 
 	engine.kpc = get_memory16_c(0x00fffc);
 
 	g_stepping = 0;
-
 }
 
 #define CHECK(start, var, value, var1, var2)				\
@@ -453,49 +431,6 @@ do_reset()
 			(var2 - var1), value);				\
 		exit(5);						\
 	}
-
-void
-check_engine_asm_defines()
-{
-	Fplus	fplus;
-	Fplus	*fplusptr;
-	Pc_log	pclog;
-	Pc_log	*pcptr;
-	Engine_reg ereg;
-	Engine_reg *eptr;
-	word32	val1;
-	word32	val2;
-
-	eptr = &ereg;
-	CHECK(eptr, eptr->fcycles, ENGINE_FCYCLES, val1, val2);
-	CHECK(eptr, eptr->fplus_ptr, ENGINE_FPLUS_PTR, val1, val2);
-	CHECK(eptr, eptr->acc, ENGINE_REG_ACC, val1, val2);
-	CHECK(eptr, eptr->xreg, ENGINE_REG_XREG, val1, val2);
-	CHECK(eptr, eptr->yreg, ENGINE_REG_YREG, val1, val2);
-	CHECK(eptr, eptr->stack, ENGINE_REG_STACK, val1, val2);
-	CHECK(eptr, eptr->dbank, ENGINE_REG_DBANK, val1, val2);
-	CHECK(eptr, eptr->direct, ENGINE_REG_DIRECT, val1, val2);
-	CHECK(eptr, eptr->psr, ENGINE_REG_PSR, val1, val2);
-	CHECK(eptr, eptr->kpc, ENGINE_REG_KPC, val1, val2);
-
-	pcptr = &pclog;
-	CHECK(pcptr, pcptr->dbank_kpc, LOG_PC_DBANK_KPC, val1, val2);
-	CHECK(pcptr, pcptr->instr, LOG_PC_INSTR, val1, val2);
-	CHECK(pcptr, pcptr->psr_acc, LOG_PC_PSR_ACC, val1, val2);
-	CHECK(pcptr, pcptr->xreg_yreg, LOG_PC_XREG_YREG, val1, val2);
-	CHECK(pcptr, pcptr->stack_direct, LOG_PC_STACK_DIRECT, val1, val2);
-	if(LOG_PC_SIZE != sizeof(pclog)) {
-		printf("LOG_PC_SIZE: %d != sizeof=%d\n", LOG_PC_SIZE,
-			(int)sizeof(pclog));
-		exit(2);
-	}
-
-	fplusptr = &fplus;
-	CHECK(fplusptr, fplusptr->plus_1, FPLUS_PLUS_1, val1, val2);
-	CHECK(fplusptr, fplusptr->plus_2, FPLUS_PLUS_2, val1, val2);
-	CHECK(fplusptr, fplusptr->plus_3, FPLUS_PLUS_3, val1, val2);
-	CHECK(fplusptr, fplusptr->plus_x_minus_1, FPLUS_PLUS_X_M1, val1, val2);
-}
 
 byte *
 memalloc_align(int size, int skip_amt, void **alloc_ptr)
@@ -529,6 +464,9 @@ memory_ptr_init()
 	/* This routine may be called several times--each time the ROM file */
 	/*  changes this will be called */
 	mem_size = MY_MIN(0xdf0000, g_mem_size_base + g_mem_size_exp);
+	if(g_rom_version == 0) {			// Apple //e
+		mem_size = g_mem_size_base;
+	}
 	g_mem_size_total = mem_size;
 	if(g_memory_alloc_ptr) {
 		free(g_memory_alloc_ptr);
@@ -551,7 +489,7 @@ int
 parse_argv(int argc, char **argv, int slashes_to_find)
 {
 	byte	*bptr;
-	char	*str;
+	char	*str, *arg2_str;
 	int	skip_amt, tmp1, len;
 	int	i;
 
@@ -594,7 +532,8 @@ parse_argv(int argc, char **argv, int slashes_to_find)
 	}
 	printf("g_argv0_path: %s\n", g_argv0_path);
 
-	for(i = 1; i < argc; i++) {
+	i = 0;
+	while(++i < argc) {
 		printf("argv[%d] = %s\n", i, argv[i]);
 		if(!strcmp("-badrd", argv[i])) {
 			printf("Halting on bad reads\n");
@@ -605,12 +544,6 @@ parse_argv(int argc, char **argv, int slashes_to_find)
 		} else if(!strcmp("-noignhalt", argv[i])) {
 			printf("Not ignoring code red halts\n");
 			g_ignore_halts = 0;
-		} else if(!strcmp("-hpdev", argv[i])) {
-			printf("Using /dev/audio\n");
-			g_use_alib = 0;
-		} else if(!strcmp("-alib", argv[i])) {
-			printf("Using Aserver audio server\n");
-			g_use_alib = 1;
 		} else if(!strcmp("-24", argv[i])) {
 			printf("Using 24-bit visual\n");
 			g_force_depth = 24;
@@ -670,7 +603,8 @@ parse_argv(int argc, char **argv, int slashes_to_find)
 				exit(1);
 			}
 			printf("Using %s as display\n", argv[i+1]);
-			sprintf(g_display_env, "DISPLAY=%s", argv[i+1]);
+			snprintf(g_display_env, sizeof(g_display_env),
+						"DISPLAY=%s", argv[i+1]);
 			putenv(&g_display_env[0]);
 			i++;
 		} else if(!strcmp("-noshm", argv[i])) {
@@ -697,6 +631,17 @@ parse_argv(int argc, char **argv, int slashes_to_find)
 		} else if(!strcmp("-logpc", argv[i])) {
 			printf("Force logpc enable\n");
 			debug_logpc_on("on");
+		} else if(!strncmp("-cfg", argv[i], 4)) {
+			if((i + 1) < argc) {
+				config_set_config_kegs_name(argv[i+1]);
+			}
+			i++;
+		} else if(argv[i][0] == '-') {
+			arg2_str = 0;
+			if((i + 1) < argc) {
+				arg2_str = argv[i+1];
+			}
+			i += config_add_argv_override(&argv[i][1], arg2_str);
 		} else {
 			printf("Bad option: %s\n", argv[i]);
 			return 3;
@@ -707,11 +652,11 @@ parse_argv(int argc, char **argv, int slashes_to_find)
 }
 
 int
-kegs_init(int mdepth)
+kegs_init(int mdepth, int screen_width, int screen_height, int no_scale_window)
 {
 	g_config_control_panel = 0;
 
-	check_engine_asm_defines();
+	woz_crc_init();
 	fixed_memory_ptrs_init();
 
 	if(sizeof(word32) != 4) {
@@ -720,24 +665,24 @@ kegs_init(int mdepth)
 		return 1;
 	}
 	prepare_a2_font();		// Prepare default built-in font
-
+	scc_init();
 	iwm_init();
-	config_init();
+	init_reg();
+	adb_init();
+	initialize_events();
+	debugger_init();
+	setup_pageinfo();
 
+	config_init();
 	load_roms_init_memory();
 
-	init_reg();
 	clear_halt();
 
-	initialize_events();
-
-	video_init(mdepth);
+	video_init(mdepth, screen_width, screen_height, no_scale_window);
 
 	sound_init();
-
-	scc_init();
-	adb_init();
 	joystick_init();
+
 	if(g_rom_version >= 3) {
 		g_c036_val_speed |= 0x40;	/* set power-on bit */
 	}
@@ -762,7 +707,7 @@ load_roms_init_memory()
 	} else {
 		g_c036_val_speed &= (~0x40);	/* clear the bit */
 	}
-	do_reset();
+	// Do not call do_reset(), caller is responsible for that
 
 	/* if user booted ROM 01, switches to ROM 03, then switches back */
 	/*  to ROM 01, then the reset routines call to Tool $0102 looks */
@@ -788,42 +733,40 @@ initialize_events()
 	g_event_list[MAX_EVENTS-1].next = 0;
 
 	g_event_start.next = 0;
-	g_event_start.dcycs = 0.0;
+	g_event_start.dfcyc = 0;
 
-	add_event_entry(DCYCS_IN_16MS, EV_60HZ);
+	add_event_entry(CYCLES_IN_16MS_RAW << 16, EV_60HZ);
 }
 
 void
-check_for_one_event_type(int type)
+check_for_one_event_type(int type, word32 mask)
 {
 	Event	*ptr;
-	int	count;
-	int	depth;
+	int	count, depth;
 
+	type = type & 0xff;
 	count = 0;
 	depth = 0;
 	ptr = g_event_start.next;
 	while(ptr != 0) {
 		depth++;
-		if(ptr->type == type) {
+		if((ptr->type & mask) == (word32)type) {
 			count++;
 			if(count != 1) {
-				halt_printf("in check_for_1, type %d found at "
-					"depth: %d, count: %d, at %f\n",
-					type, depth, count, ptr->dcycs);
+				halt_printf("in check_for_1, type %04x found "
+					"at depth: %d, count: %d, at %016llx\n",
+					ptr->type, depth, count, ptr->dfcyc);
 			}
 		}
 		ptr = ptr->next;
 	}
 }
 
-
 void
-add_event_entry(double dcycs, int type)
+add_event_entry(dword64 dfcyc, int type)
 {
 	Event	*this_event;
 	Event	*ptr, *prev_ptr;
-	int	tmp_type;
 	int	done;
 
 	this_event = g_event_free.next;
@@ -836,16 +779,15 @@ add_event_entry(double dcycs, int type)
 
 	this_event->type = type;
 
-	tmp_type = type & 0xff;
-	if((dcycs < 0.0) || (dcycs > (g_cur_dcycs + 50*1000*1000.0)) ||
-			((dcycs < g_cur_dcycs) && (tmp_type != EV_SCAN_INT))) {
-		halt_printf("add_event: dcycs: %f, type:%05x, cur_dcycs: %f!\n",
-			dcycs, type, g_cur_dcycs);
-		dcycs = g_cur_dcycs + 1000.0;
+	if((dfcyc > (g_cur_dfcyc + (50LL*1000*1000 << 16))) ||
+						(dfcyc < g_cur_dfcyc)) {
+		halt_printf("add_event bad dfcyc:%016llx, type:%05x, "
+			"cur_dfcyc: %016llx!\n", dfcyc, type, g_cur_dfcyc);
+		dfcyc = g_cur_dfcyc + (1000LL << 16);
 	}
 
 	ptr = g_event_start.next;
-	if(ptr && (dcycs < ptr->dcycs)) {
+	if(ptr && (dfcyc < ptr->dfcyc)) {
 		/* create event before next expected event */
 		/* do this by calling engine_recalc_events */
 		engine_recalc_events();
@@ -858,29 +800,29 @@ add_event_entry(double dcycs, int type)
 	while(!done) {
 		if(ptr == 0) {
 			this_event->next = ptr;
-			this_event->dcycs = dcycs;
+			this_event->dfcyc = dfcyc;
 			prev_ptr->next = this_event;
-			return;
+			break;
 		} else {
-			if(ptr->dcycs < dcycs) {
-				/* step across this guy */
+			if(ptr->dfcyc < dfcyc) {	// step across this guy
 				prev_ptr = ptr;
 				ptr = ptr->next;
-			} else {
-				/* go in front of this guy */
-				this_event->dcycs = dcycs;
+			} else {			// go before this guy */
+				this_event->dfcyc = dfcyc;
 				this_event->next = ptr;
 				prev_ptr->next = this_event;
-				return;
+				break;
 			}
 		}
 	}
+
+	check_for_one_event_type(type, 0xffff);
 }
 
 extern int g_doc_saved_ctl;
 
-double
-remove_event_entry(int type)
+dword64
+remove_event_entry(int type, word32 mask)
 {
 	Event	*ptr, *prev_ptr;
 	Event	*next_ptr;
@@ -889,16 +831,15 @@ remove_event_entry(int type)
 	prev_ptr = &g_event_start;
 
 	while(ptr != 0) {
-		if((ptr->type & 0xffff) == type) {
-			/* got it, remove it */
-			next_ptr = ptr->next;
+		if((ptr->type & mask) == (word32)type) {	// got it
+			next_ptr = ptr->next;			// remove it
 			prev_ptr->next = next_ptr;
 
 			/* Add ptr to free list */
 			ptr->next = g_event_free.next;
 			g_event_free.next = ptr;
 
-			return ptr->dcycs;
+			return ptr->dfcyc;
 		}
 		prev_ptr = ptr;
 		ptr = ptr->next;
@@ -908,100 +849,126 @@ remove_event_entry(int type)
 	if((type & 0xff) == EV_DOC_INT) {
 		printf("DOC, g_doc_saved_ctl = %02x\n", g_doc_saved_ctl);
 	}
-#ifdef HPUX
-	U_STACK_TRACE();
-#endif
 	show_all_events();
 
-	return 0.0;
+	return 0;
 }
 
 void
-add_event_stop(double dcycs)
+add_event_stop(dword64 dfcyc)
 {
-	add_event_entry(dcycs, EV_STOP);
+	add_event_entry(dfcyc, EV_STOP);
 }
 
 void
-add_event_doc(double dcycs, int osc)
+add_event_doc(dword64 dfcyc, int osc)
 {
-	if(dcycs < g_cur_dcycs) {
-		dcycs = g_cur_dcycs;
-		//halt_printf("add_event_doc: dcycs: %f, cur_dcycs: %f\n",
-		//	dcycs, g_cur_dcycs);
+	if(dfcyc < g_cur_dfcyc) {
+		dfcyc = g_cur_dfcyc;
+		//halt_printf("add_event_doc: dfcyc:%016llx, cur_dfcyc:"
+		//	"%016llx\n", dfcyc, g_cur_dfcyc);
 	}
 
-	add_event_entry(dcycs, EV_DOC_INT + (osc << 8));
+	add_event_entry(dfcyc, EV_DOC_INT + (osc << 8));
 }
 
 void
-add_event_scc(double dcycs, int type)
+add_event_scc(dword64 dfcyc, int type)
 {
-	if(dcycs < g_cur_dcycs) {
-		dcycs = g_cur_dcycs;
+	if(dfcyc < g_cur_dfcyc) {
+		dfcyc = g_cur_dfcyc;
 	}
 
-	add_event_entry(dcycs, EV_SCC + (type << 8));
+	add_event_entry(dfcyc, EV_SCC + (type << 8));
 }
 
 void
 add_event_vbl()
 {
-	double	dcycs;
+	dword64	dfcyc;
 
-	dcycs = g_last_vbl_dcycs + (DCYCS_IN_16MS * (192.0/262.0));
-	add_event_entry(dcycs, EV_VBL_INT);
+	dfcyc = g_last_vbl_dfcyc + ((192*65LL) << 16);
+	add_event_entry(dfcyc, EV_VBL_INT);
 }
 
 void
 add_event_vid_upd(int line)
 {
-	double	dcycs;
+	dword64	dfcyc;
 
-	dcycs = g_last_vbl_dcycs + ((DCYCS_IN_16MS * line) / 262.0);
-	add_event_entry(dcycs, EV_VID_UPD + (line << 8));
+	dfcyc = g_last_vbl_dfcyc + (((line + 1) * 65LL) << 16);
+	add_event_entry(dfcyc, EV_VID_UPD + (line << 8));
+		// Redraw line when video counters first read video data
 }
 
 void
-add_event_mockingboard(double dcycs)
+add_event_mockingboard(dword64 dfcyc)
 {
-	if(dcycs < g_cur_dcycs) {
-		dcycs = g_cur_dcycs;
+	if(dfcyc < g_cur_dfcyc) {
+		dfcyc = g_cur_dfcyc;
 	}
-	add_event_entry(dcycs, EV_MOCKINGBOARD);
+	add_event_entry(dfcyc, EV_MOCKINGBOARD);
 }
 
-double
+dword64 g_dfcyc_scan_int = 0;
+
+void
+add_event_scan_int(dword64 dfcyc, int line)
+{
+	dword64	dfcyc_scan_int;
+
+	dfcyc_scan_int = g_dfcyc_scan_int;
+	if(dfcyc_scan_int) {				// Event is pending
+		if(dfcyc >= g_dfcyc_scan_int) {
+			// We are after (or the same) as current, do nothing
+			return;
+		}
+		remove_event_entry(EV_SCAN_INT, 0xff);
+	}
+	if(dfcyc < g_cur_dfcyc) {
+		// scan_int for line 0 is found during EV_60HZ, and some
+		//  cycles may have passed before the EV_60HZ was handled.
+		// We need it to happen now, so just adjust dfcyc
+		dfcyc = g_cur_dfcyc;
+	}
+	add_event_entry(dfcyc, EV_SCAN_INT + (line << 8));
+	g_dfcyc_scan_int = dfcyc;
+
+	check_for_one_event_type(EV_SCAN_INT, 0xff);
+}
+
+
+dword64
 remove_event_doc(int osc)
 {
-	return remove_event_entry(EV_DOC_INT + (osc << 8));
+	return remove_event_entry(EV_DOC_INT + (osc << 8), 0xffff);
 }
 
-double
+dword64
 remove_event_scc(int type)
 {
-	return remove_event_entry(EV_SCC + (type << 8));
+	return remove_event_entry(EV_SCC + (type << 8), 0xffff);
 }
 
 void
 remove_event_mockingboard()
 {
-	(void)remove_event_entry(EV_MOCKINGBOARD);
+	(void)remove_event_entry(EV_MOCKINGBOARD, 0xff);
 }
 
 void
 show_all_events()
 {
 	Event	*ptr;
+	dword64	dfcyc;
 	int	count;
-	double	dcycs;
 
 	count = 0;
 	ptr = g_event_start.next;
 	while(ptr != 0) {
-		dcycs = ptr->dcycs;
-		printf("Event: %02x: type: %05x, dcycs: %f (%f)\n",
-			count, ptr->type, dcycs, dcycs - g_cur_dcycs);
+		dfcyc = ptr->dfcyc;
+		printf("Event: %02x: type: %05x, dfcyc: %016llx (%08llx)\n",
+			count, ptr->type, dfcyc, dfcyc - g_cur_dfcyc);
 		ptr = ptr->next;
 		count++;
 	}
@@ -1020,7 +987,8 @@ double	g_dtime_eff_pmhz_array[60];
 double	g_dtime_in_run_16ms = 0;
 double	g_dtime_outside_run_16ms = 0;
 double	g_dtime_end_16ms = 0;
-int	g_limit_speed = 0;
+int	g_limit_speed = 3;
+int	g_zip_speed_mhz = 16;		// 16MHz default
 double	sim_time[60];
 double	g_sim_sum = 0.0;
 
@@ -1030,6 +998,7 @@ double	g_zip_pmhz = 8.0;
 double	g_sim_mhz = 100.0;
 int	g_line_ref_amt = 1;
 int	g_video_line_update_interval = 0;
+dword64	g_video_pixel_dcount = 0;
 
 Fplus	g_recip_projected_pmhz_slow;
 Fplus	g_recip_projected_pmhz_fast;
@@ -1049,13 +1018,13 @@ show_pmhz()
 void
 setup_zip_speeds()
 {
-	double	frecip;
+	dword64	drecip;
 	double	fmhz;
 	int	mult;
 
 	mult = 16 - ((g_zipgs_reg_c05a >> 4) & 0xf);
 		// 16 = full speed, 1 = 1/16th speed
-	fmhz = (8.0 * mult) / 16.0;
+	fmhz = (g_zip_speed_mhz * mult) / 16.0;
 #if 0
 	if(mult == 16) {
 		/* increase full speed by 19% to make zipgs freq measuring */
@@ -1063,15 +1032,15 @@ setup_zip_speeds()
 		fmhz = fmhz * 1.19;
 	}
 #endif
-	frecip = 1.0 / fmhz;
+	drecip = (dword64)(65536 / fmhz);
 	g_zip_pmhz = fmhz;
-	g_recip_projected_pmhz_zip.plus_1 = frecip;
-	g_recip_projected_pmhz_zip.plus_2 = 2.0 * frecip;
-	g_recip_projected_pmhz_zip.plus_3 = 3.0 * frecip;
-	if(frecip >= 0.5) {
-		g_recip_projected_pmhz_zip.plus_x_minus_1 = 1.01;
+	g_recip_projected_pmhz_zip.dplus_1 = drecip;
+	if(fmhz <= 2.0) {
+		g_recip_projected_pmhz_zip.dplus_x_minus_1 =
+						(dword64)(1.01 * 65536);
 	} else {
-		g_recip_projected_pmhz_zip.plus_x_minus_1 = 1.01 - frecip;
+		g_recip_projected_pmhz_zip.dplus_x_minus_1 =
+					(dword64)(1.01 * 65536 - drecip);
 	}
 }
 
@@ -1089,6 +1058,9 @@ run_16ms()
 	g_dtime_sleep = 1.0/61.0;		// For control_panel/debugger
 	if(g_config_control_panel) {
 		ret = cfg_control_panel_update();
+		if(!g_config_control_panel) {
+			return 0;	// Was just switched off, get out
+		}
 	} else {
 		if(g_halt_sim) {
 			ret = debugger_run_16ms();
@@ -1103,8 +1075,10 @@ run_16ms()
 
 	// If we are ahead, then do the sleep now
 	micro_sleep(g_dtime_sleep);
-	g_dtime_sleep = 0.0;
 	dtime_end2 = get_dtime();
+	//printf("Did sleep for %f, dtime passed:%f\n", g_dtime_sleep,
+	//					dtime_end2 - dtime_end);
+	g_dtime_sleep = 0.0;
 
 	g_dtime_in_sleep += (dtime_end2 - dtime_end);
 
@@ -1128,8 +1102,8 @@ run_a2_one_vbl()
 {
 	Fplus	*fplus_ptr;
 	Event	*this_event, *db1;
-	double	dcycs, now_dtime, prev_dtime, prerun_fcycles, fspeed_mult;
-	double	fcycles_stop;
+	double	now_dtime, prev_dtime, fspeed_mult;
+	dword64	dfcyc, dfcyc_stop, prerun_dfcyc;
 	word32	ret, zip_speed_0tof, zip_speed_0tof_new;
 	int	zip_en, zip_follow_cps, type, motor_on, iwm_1, iwm_25, fast;
 	int	limit_speed, apple35_sel, zip_speed, faster_than_28, unl_speed;
@@ -1139,15 +1113,12 @@ run_a2_one_vbl()
 
 	g_cur_sim_dtime = 0.0;
 
-	g_recip_projected_pmhz_slow.plus_1 = 1.0;
-	g_recip_projected_pmhz_slow.plus_2 = 2.0;
-	g_recip_projected_pmhz_slow.plus_3 = 3.0;
-	g_recip_projected_pmhz_slow.plus_x_minus_1 = 0.9;
+	g_recip_projected_pmhz_slow.dplus_1 = 0x10000;
+	g_recip_projected_pmhz_slow.dplus_x_minus_1 = (dword64)(0.9 * 0x10000);
 
-	g_recip_projected_pmhz_fast.plus_1 = (1.0 / 2.8);
-	g_recip_projected_pmhz_fast.plus_2 = (2.0 / 2.8);
-	g_recip_projected_pmhz_fast.plus_3 = (3.0 / 2.8);
-	g_recip_projected_pmhz_fast.plus_x_minus_1 = (1.98 - (1.0/2.8));
+	g_recip_projected_pmhz_fast.dplus_1 = (dword64)(0x10000 / 2.8);
+	g_recip_projected_pmhz_fast.dplus_x_minus_1 = (dword64)
+				((1.98 - (1.0/2.8)) * 0x10000);
 
 	g_recip_projected_pmhz_x10.plus_1 = (1.0 / 28.0);
 	g_recip_projected_pmhz_x10.plus_2 = (2.0 / 28.0);
@@ -1177,7 +1148,7 @@ run_a2_one_vbl()
 
 		motor_on = g_iwm_motor_on;
 		limit_speed = g_limit_speed;
-		apple35_sel = g_c031_disk35 & 0x40;
+		apple35_sel = g_iwm.state & IWM_STATE_C031_APPLE35SEL;
 		zip_en = ((g_zipgs_reg_c05b & 0x10) == 0);
 		zip_follow_cps = ((g_zipgs_reg_c059 & 0x8) != 0);
 		zip_speed_0tof_new = g_zipgs_reg_c05a & 0xf0;
@@ -1225,20 +1196,19 @@ run_a2_one_vbl()
 
 		engine.fplus_ptr = fplus_ptr;
 
-		prerun_fcycles = g_cur_dcycs - g_last_vbl_dcycs;
-		engine.fcycles = prerun_fcycles;
-		fcycles_stop = (g_event_start.next->dcycs - g_last_vbl_dcycs) +
-							0.001;
+		prerun_dfcyc = g_cur_dfcyc;
+		engine.dfcyc = prerun_dfcyc;
+		dfcyc_stop = g_event_start.next->dfcyc + 1;
 		if(g_stepping) {
-			fcycles_stop = prerun_fcycles;
+			dfcyc_stop = prerun_dfcyc + 1;
 		}
-		g_fcycles_end = fcycles_stop;
+		g_dcycles_end = dfcyc_stop;
 
 #if 0
 		printf("Enter engine, fcycs: %f, stop: %f\n",
 			prerun_fcycles, fcycles_stop);
-		printf("g_cur_dcycs: %f, last_vbl_dcyc: %f\n", g_cur_dcycs,
-			g_last_vbl_dcycs);
+		printf("g_cur_dfcyc:%016llx, last_vbl_dfcyc:%016llx\n",
+			g_cur_dfcyc, g_last_vbl_dfcyc);
 #endif
 
 		g_num_enter_engine++;
@@ -1250,17 +1220,16 @@ run_a2_one_vbl()
 
 		g_cur_sim_dtime += (now_dtime - prev_dtime);
 
-		dcycs = g_last_vbl_dcycs + (double)(engine.fcycles);
+		dfcyc = engine.dfcyc;
+		g_cur_dfcyc = dfcyc;
 
-		g_dadjcycs += (engine.fcycles - prerun_fcycles) *
+		g_dadjcycs += (engine.dfcyc - prerun_dfcyc) * (1/65536.0) *
 					fspeed_mult;
 
 #if 0
-		printf("...back, engine.fcycles: %f, dcycs: %f\n",
-			(double)engine.fcycles, dcycs);
+		printf("...back, engine.dfcyc: %016llx, dfcyc: %016llx\n",
+			(double)engine.dfcyc, dfcyc);
 #endif
-
-		g_cur_dcycs = dcycs;
 
 		if(ret != 0) {
 			g_engine_action++;
@@ -1268,46 +1237,46 @@ run_a2_one_vbl()
 		}
 
 		this_event = g_event_start.next;
-		while(dcycs >= this_event->dcycs) {
+		while(dfcyc >= this_event->dfcyc) {
 			/* Pop this guy off of the queue */
 			g_event_start.next = this_event->next;
 
 			type = this_event->type;
 			this_event->next = g_event_free.next;
 			g_event_free.next = this_event;
-			dbg_log_info(dcycs, type, 0, 0x101);
+			dbg_log_info(dfcyc, type, 0, 0x101);
 			switch(type & 0xff) {
 			case EV_60HZ:
-				update_60hz(dcycs, now_dtime);
+				update_60hz(dfcyc, now_dtime);
 				return 0;
 				break;
 			case EV_STOP:
 				printf("type: EV_STOP\n");
-				printf("next: %p, dcycs: %f\n",
-						g_event_start.next, dcycs);
+				printf("next: %p, dfcyc: %016llx\n",
+						g_event_start.next, dfcyc);
 				db1 = g_event_start.next;
-				halt_printf("next.dcycs: %f\n", db1->dcycs);
+				halt_printf("next.dfcyc:%016llx\n", db1->dfcyc);
 				break;
 			case EV_SCAN_INT:
 				g_engine_scan_int++;
 				irq_printf("type: scan int\n");
-				do_scan_int(dcycs, type >> 8);
+				do_scan_int(dfcyc, type >> 8);
 				break;
 			case EV_DOC_INT:
 				g_engine_doc_int++;
-				doc_handle_event(type >> 8, dcycs);
+				doc_handle_event(type >> 8, dfcyc);
 				break;
 			case EV_VBL_INT:
 				do_vbl_int();
 				break;
 			case EV_SCC:
-				do_scc_event(type >> 8, dcycs);
+				scc_do_event(dfcyc, type >> 8);
 				break;
 			case EV_VID_UPD:
 				video_update_event_line(type >> 8);
 				break;
 			case EV_MOCKINGBOARD:
-				mockingboard_event(dcycs);
+				mockingboard_event(dfcyc);
 				break;
 			default:
 				printf("Unknown event: %d!\n", type);
@@ -1355,12 +1324,11 @@ remove_irq(word32 irq_mask)
 void
 take_irq()
 {
-	word32	new_kpc;
-	word32	va;
+	word32	new_kpc, va;
 
-	irq_printf("Taking irq, at: %02x/%04x, psw: %02x, dcycs: %f\n",
-			engine.kpc>>16, engine.kpc & 0xffff, engine.psr,
-			g_cur_dcycs);
+	irq_printf("Taking irq, at: %02x/%04x, psw: %02x, dfcyc:%016llx\n",
+			engine.kpc >> 16, engine.kpc & 0xffff, engine.psr,
+			g_cur_dfcyc);
 
 	g_num_irq++;
 	if(g_wait_pending) {
@@ -1416,7 +1384,6 @@ double	g_dtime_expected = (1.0/VBL_RATE);	// Approximately 1.0/60.0
 
 int g_scan_int_events = 0;
 
-
 void
 show_dtime_array()
 {
@@ -1447,33 +1414,34 @@ show_dtime_array()
 
 
 void
-update_60hz(double dcycs, double dtime_now)
+update_60hz(dword64 dfcyc, double dtime_now)
 {
 	register word32 end_time;
 	char	status_buf[1024];
 	char	sim_mhz_buf[128];
 	char	total_mhz_buf[128];
+	char	sp_buf[128];
 	char	*sim_mhz_ptr, *total_mhz_ptr, *code_str1, *code_str2, *sp_str;
-	double	eff_pmhz, planned_dcycs, predicted_pmhz, recip_predicted_pmhz;
+	dword64	planned_dcyc;
+	double	eff_pmhz, predicted_pmhz, recip_predicted_pmhz;
 	double	dtime_this_vbl_sim, dtime_diff_1sec, dratio, dtime_diff;
 	double	dtime_till_expected, dtime_this_vbl, dadjcycs_this_vbl;
-	double	dadj_cycles_1sec, dtmp1, dtmp2, dtmp3, dtmp4, dtmp5;
-	double	dnatcycs_1sec;
+	double	dadj_cycles_1sec, dnatcycs_1sec;
 	int	tmp, doit_3_persec, cur_vbl_index, prev_vbl_index;
 
 	/* NOTE: this event is defined to occur before line 0 */
 	/* It's actually happening at the start of the border for line (-1) */
 	/* All other timings should be adjusted for this */
 
-	irq_printf("vbl_60hz: vbl: %d, dcycs: %f, last_vbl_dcycs: %f\n",
-		g_vbl_count, dcycs, g_last_vbl_dcycs);
+	irq_printf("vbl_60hz: vbl: %d, dfcyc:%016llx, last_vbl_dfcyc:%016llx\n",
+		g_vbl_count, dfcyc, g_last_vbl_dfcyc);
 
-	planned_dcycs = DCYCS_IN_16MS;
+	planned_dcyc = CYCLES_IN_16MS_RAW << 16;
 
-	g_last_vbl_dcycs = g_last_vbl_dcycs + planned_dcycs;
+	g_last_vbl_dfcyc = g_last_vbl_dfcyc + planned_dcyc;
 
-	add_event_entry(g_last_vbl_dcycs + planned_dcycs, EV_60HZ);
-	check_for_one_event_type(EV_60HZ);
+	add_event_entry(g_last_vbl_dfcyc + planned_dcyc, EV_60HZ);
+	check_for_one_event_type(EV_60HZ, 0xff);
 
 	cur_vbl_index = g_vbl_index_count;
 
@@ -1509,13 +1477,17 @@ update_60hz(double dcycs, double dtime_now)
 		} else {
 			g_sim_mhz = (dadj_cycles_1sec / g_sim_sum) /
 							(1000.0*1000.0);
-			sprintf(sim_mhz_buf, "%6.2f", g_sim_mhz);
+			if(g_sim_mhz > 8000.0) {
+				g_sim_mhz = 8000.0;
+			}
+			snprintf(sim_mhz_buf, sizeof(sim_mhz_buf), "%6.2f",
+								g_sim_mhz);
 			sim_mhz_ptr = sim_mhz_buf;
 		}
 		if(dtime_diff_1sec < (1.0/250.0)) {
 			total_mhz_ptr = "???";
 		} else {
-			sprintf(total_mhz_buf, "%6.2f",
+			snprintf(total_mhz_buf, sizeof(total_mhz_buf), "%6.2f",
 				(dadj_cycles_1sec / dtime_diff_1sec) /
 								(1000000.0));
 			total_mhz_ptr = total_mhz_buf;
@@ -1529,11 +1501,16 @@ update_60hz(double dcycs, double dtime_now)
 		case 5:	sp_str = "280.0Mhz"; break;
 		default: sp_str = "Unlimited"; break;
 		}
+		if(g_limit_speed == 3) {		// ZipGS
+			snprintf(sp_buf, sizeof(sp_buf), "%1.1fMHz",
+							g_zip_pmhz);
+			sp_str = sp_buf;
+		}
 
-		sprintf(status_buf, "dcycs:%9.1f sim MHz:%s "
-			"Eff MHz:%s, sec:%1.3f vol:%02x Limit:%s",
-			dcycs/(1000.0*1000.0), sim_mhz_ptr, total_mhz_ptr,
-			dtime_diff_1sec, g_doc_vol, sp_str);
+		snprintf(status_buf, sizeof(status_buf), "dfcyc:%7.1f sim "
+			"MHz:%s Eff MHz:%s, sec:%1.3f vol:%02x Limit:%s",
+			(double)(dfcyc >> 20)/65536.0, sim_mhz_ptr,
+			total_mhz_ptr, dtime_diff_1sec, g_doc_vol, sp_str);
 		video_update_status_line(0, status_buf);
 
 		if(g_video_line_update_interval == 0) {
@@ -1554,33 +1531,7 @@ update_60hz(double dcycs, double dtime_now)
 		}
 		dnatcycs_1sec = dnatcycs_1sec / 100.0; /* eff mult by 100 */
 
-		dtmp2 = (double)(g_cycs_in_check_input) / dnatcycs_1sec;
-		//dtmp3 = (double)(g_cycs_in_refresh_line) / dnatcycs_1sec;
-		dtmp3 = (double)(g_cycs_in_run_16ms) / dnatcycs_1sec;
-		dtmp4 = (double)(g_cycs_in_refresh_ximage) / dnatcycs_1sec;
-		sprintf(status_buf, "xfer:%08x, %5.1f ref_amt:%d "
-			"ch_in:%4.1f%% ref_l:%4.1f%% ref_x:%4.1f%%",
-			g_refresh_bytes_xfer, g_dnatcycs_1sec/(1000.0*1000.0),
-			g_line_ref_amt, dtmp2, dtmp3, dtmp4);
-		video_update_status_line(1, status_buf);
-
-		sprintf(status_buf, "Ints:%3d I/O:%4dK BRK:%3d COP:%2d "
-			"Eng:%3d act:%3d rev:%3d esi:%3d edi:%3d",
-			g_num_irq, g_io_amt>>10, g_num_brk, g_num_cop,
-			g_num_enter_engine, g_engine_action,
-			g_engine_recalc_event, g_engine_scan_int,
-			g_engine_doc_int);
-		video_update_status_line(2, status_buf);
-
-		dtmp1 = (double)(g_cycs_in_sound1) / dnatcycs_1sec;
-		dtmp2 = (double)(g_cycs_in_sound2) / dnatcycs_1sec;
-		dtmp3 = (double)(g_cycs_in_sound3) / dnatcycs_1sec;
-		dtmp4 = (double)(g_cycs_in_start_sound) / dnatcycs_1sec;
-		dtmp5 = (double)(g_cycs_in_est_sound) / dnatcycs_1sec;
-		sprintf(status_buf, "snd1:%4.1f%%, 2:%4.1f%%, "
-			"3:%4.1f%%, st:%4.1f%% est:%4.1f%% %4.2f",
-			dtmp1, dtmp2, dtmp3, dtmp4, dtmp5, g_fvoices);
-		video_update_status_line(3, status_buf);
+		g_video_pixel_dcount = 0;
 
 		code_str1 = "";
 		code_str2 = "";
@@ -1592,24 +1543,18 @@ update_60hz(double dcycs, double dtime_now)
 			code_str1 = "Code: RED";
 			code_str2 = "Emulated state corrupt?";
 		}
-#if 0
-		sprintf(status_buf, "snd_plays:%4d, doc_ev:%4d, st_snd:%4d "
-			"snd_parms: %4d %s",
-			g_num_snd_plays, g_num_doc_events, g_num_start_sounds,
-			g_num_recalc_snd_parms, code_str1);
-#endif
-		sprintf(status_buf, "sleep_dtime:%8.6f, out_16ms:%8.6f, "
-			"in_16ms:%8.6f, snd_pl:%d", g_dtime_in_sleep,
-			g_dtime_outside_run_16ms, g_dtime_in_run_16ms,
-			g_num_snd_plays);
-		video_update_status_line(4, status_buf);
+		snprintf(status_buf, sizeof(status_buf), "sleep_dtime:%8.6f, "
+			"out_16ms:%8.6f, in_16ms:%8.6f, snd_pl:%d",
+			g_dtime_in_sleep, g_dtime_outside_run_16ms,
+			g_dtime_in_run_16ms, g_num_snd_plays);
+		video_update_status_line(1, status_buf);
 
-		draw_iwm_status(5, status_buf);
+		draw_iwm_status(2, status_buf);
 
-		sprintf(status_buf, "KEGS v%-6s       "
+		snprintf(status_buf, sizeof(status_buf), " KEGS v%-6s       "
 			"Press F4 for Config Menu    %s %s",
 			g_kegs_version_str, code_str1, code_str2);
-		video_update_status_line(6, status_buf);
+		video_update_status_line(3, status_buf);
 
 		g_status_refresh_needed = 1;
 
@@ -1625,15 +1570,7 @@ update_60hz(double dcycs, double dtime_now)
 
 		g_cycs_in_40col = 0;
 		g_cycs_in_xredraw = 0;
-		g_cycs_in_check_input = 0;
 		g_cycs_in_refresh_line = 0;
-		g_cycs_in_refresh_ximage = 0;
-		g_cycs_in_sound1 = 0;
-		g_cycs_in_sound2 = 0;
-		g_cycs_in_sound3 = 0;
-		g_cycs_in_sound4 = 0;
-		g_cycs_in_start_sound = 0;
-		g_cycs_in_est_sound = 0;
 		g_dnatcycs_1sec = 0.0;
 		g_dtime_outside_run_16ms = 0.0;
 		g_dtime_in_run_16ms = 0.0;
@@ -1641,12 +1578,7 @@ update_60hz(double dcycs, double dtime_now)
 
 		g_dtime_in_sleep = 0;
 		g_num_snd_plays = 0;
-		g_num_doc_events = 0;
-		g_num_start_sounds = 0;
-		g_num_scan_osc = 0;
 		g_num_recalc_snd_parms = 0;
-
-		g_fvoices = (float)0.0;
 	}
 
 	dtime_this_vbl = dtime_now - g_dtime_last_vbl;
@@ -1661,8 +1593,7 @@ update_60hz(double dcycs, double dtime_now)
 
 	g_dtime_expected += (1.0/VBL_RATE);	// Approx. 1/60
 
-	eff_pmhz = ((dadjcycs_this_vbl) / (dtime_this_vbl)) /
-							DCYCS_1_MHZ;
+	eff_pmhz = (dadjcycs_this_vbl / dtime_this_vbl) / DCYCS_1_MHZ;
 
 	/* using eff_pmhz, predict how many cycles can be run by */
 	/*  g_dtime_expected */
@@ -1686,18 +1617,18 @@ update_60hz(double dcycs, double dtime_now)
 		predicted_pmhz = 1.0;
 	}
 
-	if(!(predicted_pmhz < 1900.0)) {
+	if(!(predicted_pmhz < 4500.0)) {
 		irq_printf("predicted: %f, set to 1900.0\n", predicted_pmhz);
-		predicted_pmhz = 1900.0;
+		predicted_pmhz = 4500.0;
 	}
 
 	recip_predicted_pmhz = 1.0/predicted_pmhz;
 	g_projected_pmhz = predicted_pmhz;
 
-	g_recip_projected_pmhz_unl.plus_1 = 1.0*recip_predicted_pmhz;
-	g_recip_projected_pmhz_unl.plus_2 = 2.0*recip_predicted_pmhz;
-	g_recip_projected_pmhz_unl.plus_3 = 3.0*recip_predicted_pmhz;
-	g_recip_projected_pmhz_unl.plus_x_minus_1 = 1.01 - recip_predicted_pmhz;
+	g_recip_projected_pmhz_unl.dplus_1 = (dword64)
+						(65536 * recip_predicted_pmhz);
+	g_recip_projected_pmhz_unl.dplus_x_minus_1 =
+			(dword64)(65536 * (1.01 - recip_predicted_pmhz));
 
 	if(dtime_till_expected < -0.125) {
 		/* If we were way off, get back on track */
@@ -1708,17 +1639,22 @@ update_60hz(double dcycs, double dtime_now)
 
 		dtime_diff = -dtime_till_expected;
 
-		irq_printf("dtime_till_exp: %f, dtime_diff: %f, dcycs: %f\n",
-			dtime_till_expected, dtime_diff, dcycs);
+		irq_printf("dtime_till_exp:%f, dtime_diff:%f, dfcyc:%016llx\n",
+			dtime_till_expected, dtime_diff, dfcyc);
 
 		g_dtime_expected += dtime_diff;
 	}
 
 	g_dtime_sleep = 0.0;
-	if(dtime_till_expected > (3.0/VBL_RATE)) {
+	if(dtime_till_expected > (1.0/VBL_RATE)) {
 		/* we're running fast, usleep */
 		g_dtime_sleep = dtime_till_expected - (1.0/VBL_RATE);
 	}
+#if 0
+	printf("Sleep %f, till_exp:%f, dtime_now:%f, exp:%f\n",
+		g_dtime_sleep, dtime_till_expected, dtime_now,
+		g_dtime_expected);
+#endif
 
 	g_dtime_this_vbl_array[prev_vbl_index] = dtime_this_vbl;
 	g_dtime_exp_array[prev_vbl_index] = g_dtime_expected;
@@ -1770,9 +1706,9 @@ update_60hz(double dcycs, double dtime_now)
 	iwm_vbl_update();
 	config_vbl_update(doit_3_persec);
 
-	sound_update(dcycs);
+	sound_update(dfcyc);
 	clock_update();
-	scc_update(dcycs);
+	scc_update(dfcyc);
 	paddle_update_buttons();
 }
 
@@ -1788,20 +1724,36 @@ do_vbl_int()
 }
 
 void
-do_scan_int(double dcycs, int line)
+do_scan_int(dword64 dfcyc, int line)
 {
 	int	c023_val;
 
-	if(dcycs) {
+	if(dfcyc) {
 		// Avoid unused param warning
 	}
 
 	g_scan_int_events = 0;
+	g_dfcyc_scan_int = 0;
 
 	c023_val = g_c023_val;
 	if(c023_val & 0x20) {
 		halt_printf("c023 scan_int and another on line %03x\n", line);
 	}
+
+#if 0
+	dvbl = (dfcyc >> 16) / 17030;
+	dline = ((dfcyc >> 16) - (dvbl * 17030)) / 65;
+	printf("do_scan_int at time %lld (%lld,line %lld), line:%d, SCB:%02x, "
+		"a2_stat_ok:%d, c023:%02x\n", dfcyc >> 16, dvbl, dline, line,
+		(g_slow_memory_ptr[0x19d00 + line] & 0x40),
+		(g_cur_a2_stat & ALL_STAT_SUPER_HIRES) != 0, c023_val);
+	for(i = 0; i < 200; i++) {
+		if(g_slow_memory_ptr[0x19d00 + i] & 0x40) {
+			printf("  Line %d has SCB:%02x\n", i,
+				g_slow_memory_ptr[0x19d00 + i]);
+		}
+	}
+#endif
 
 	/* make sure scan int is still enabled for this line */
 	if((g_slow_memory_ptr[0x19d00 + line] & 0x40) &&
@@ -1825,7 +1777,8 @@ do_scan_int(double dcycs, int line)
 void
 check_scan_line_int(int cur_video_line)
 {
-	int	delay, start, line;
+	dword64	ddelay;
+	int	start, line;
 	int	i;
 
 	/* Called during VBL interrupt phase */
@@ -1854,30 +1807,40 @@ check_scan_line_int(int cur_video_line)
 				i, line, start);
 			i = 0;
 		}
-		if(g_slow_memory_ptr[0x19d00+i] & 0x40) {
+		if(g_slow_memory_ptr[0x19d00 + i] & 0x40) {
 			irq_printf("Adding scan_int for line %d\n", i);
-			delay = (DCYCS_IN_16MS/262.0) * ((double)line);
-			add_event_entry(g_last_vbl_dcycs + delay, EV_SCAN_INT +
-					(line << 8));
+			ddelay = (65ULL * line) << 16;
+			add_event_scan_int(g_last_vbl_dfcyc + ddelay, line);
 			g_scan_int_events = 1;
-			check_for_one_event_type(EV_SCAN_INT);
 			break;
 		}
 	}
 }
 
 void
-check_for_new_scan_int(double dcycs)
+check_for_new_scan_int(dword64 dfcyc)
 {
 	int	cur_video_line;
 
-	cur_video_line = get_lines_since_vbl(dcycs) >> 8;
+	cur_video_line = get_lines_since_vbl(dfcyc) >> 8;
 	check_scan_line_int(cur_video_line);
+}
+
+void
+scb_changed(dword64 dfcyc, word32 addr, word32 new_val, word32 old_val)
+{
+	if(new_val & (~old_val) & 0x40) {
+		check_for_new_scan_int(dfcyc);
+	}
+	if(addr) {
+	}
 }
 
 void
 init_reg()
 {
+	memset(&engine, 0, sizeof(engine));
+
 	engine.acc = 0;
 	engine.xreg = 0;
 	engine.yreg = 0;
@@ -1885,9 +1848,7 @@ init_reg()
 	engine.direct = 0;
 	engine.psr = 0x134;
 	engine.fplus_ptr = 0;
-
 }
-
 
 void
 handle_action(word32 ret)
@@ -1903,27 +1864,18 @@ handle_action(word32 ret)
 	case RET_COP:
 		do_cop(arg);
 		break;
-	case RET_C700:
-		do_c700(arg);
-		break;
-	case RET_C70A:
-		do_c70a(arg);
-		break;
-	case RET_C70D:
-		do_c70d(arg);
-		break;
 	case RET_IRQ:
 		irq_printf("Special fast IRQ response.  irq_pending: %x\n",
 			g_irq_pending);
 		break;
 	case RET_WDM:
-		do_wdm(arg & 0xff);
+		do_wdm(arg);
 		break;
 	case RET_STP:
 		do_stp();
 		break;
 	case RET_TOOLTRACE:
-		dbg_log_info(g_cur_dcycs, engine.kpc, engine.xreg,
+		dbg_log_info(g_cur_dfcyc, engine.kpc, engine.xreg,
 						(engine.stack << 16) | 0xe100);
 		break;
 	default:
@@ -1951,11 +1903,42 @@ do_cop(word32 ret)
 void
 do_wdm(word32 arg)
 {
-	switch(arg) {
+	if(arg == 0x00c7) {
+		// WDM, 0xc7, 0x00: WDM in Slot 7
+		if(engine.psr & 0x40) {
+			// Overflow set: $C700 called
+			do_c700(arg);
+		} else if(engine.psr & 1) {	// V=0, C=1: $C70D called
+			do_c70d(arg);
+		} else {			// V=0, C=0, $C70A called
+			do_c70a(arg);
+		}
+		return;
+	}
+	if(arg == 0x00ea) {
+		// WDM, 0xea, 0x00: WDM emulator ID
+		do_wdm_emulator_id();
+		return;
+	}
+	if((arg == 0xeaea) && ((engine.psr & 0x171) == 0x41) &&
+						(engine.acc == 0x4d44)) {
+		// WDM $EA,$EA with V=1,C=1 and ACC=0x4d44 ("EM")
+		engine.psr = engine.psr & 0x1bf;	// V=0
+		// printf("WDM $EA,$EA, cleared V=0, psr:%04x\n", engine.psr);
+		return;
+	}
+
+	switch(arg & 0xff) {
 	case 0x8d: /* Bouncin Ferno does WDM 8d */
 		break;
+	case 0xea:	// Detectiong feature, don't flag an error
+		break;
+	case 0xfc:	// HOST.FST "head_call" for ATINIT for ProDOS 8
+	case 0xfd:	// HOST.FST "tail_call" for ATINIT for ProDOS 8
+	case 0xff:	// HOST.FST "call_host" for GS/OS driver
+		break;
 	default:
-		halt_printf("do_wdm: %02x!\n", arg);
+		halt_printf("do_wdm: %04x!\n", arg);
 	}
 }
 
@@ -1973,6 +1956,70 @@ do_stp()
 		halt_printf("Hit STP instruction at: %06x, press RESET to "
 				"continue\n", engine.kpc);
 	}
+}
+
+char g_emulator_name[64];
+
+void
+do_wdm_emulator_id()
+{
+	word32	addr, version, subvers;
+	int	maxlen, len, c, got_dot;
+	int	i;
+
+	// WDM, $EA, $00: WDM emulator ID
+	// dbank.acc = address to write emulator description string
+	// X = size of buffer to hold string
+	// Y = 0 (not checked)
+	// Returns: X: actual length of emulator string (always <=
+	//	value in X at call)
+	// ACC: emulator version as: $VVMN as BCD, so 1.32 is $0132
+	// Y: Emulation feature flags.  bit 0: $c06c-$c06f timer available
+	// Works in emulation mode
+
+	printf("WDM EA at %06x.  acc:%04x, dbank:%02x xreg:%04x\n", engine.kpc,
+				engine.acc, engine.dbank, engine.xreg);
+	maxlen = engine.xreg;
+	cfg_strncpy(&g_emulator_name[0], "KEGS v", 64);
+	cfg_strlcat(&g_emulator_name[0], &g_kegs_version_str[0], 64);
+	len = (int)strlen(&g_emulator_name[0]);
+	addr = engine.acc;
+	engine.xreg = 0;
+	for(i = 0; i < len; i++) {
+		if(i >= maxlen) {
+			break;
+		}
+		addr = (engine.dbank << 8) | (addr & 0xffff);
+		set_memory_c(addr, 0x80 | g_emulator_name[i], 1);
+		addr++;
+		engine.xreg = i + 1;
+	}
+
+	version = 0;
+	subvers = 0;
+	len = (int)strlen(&g_kegs_version_str[0]);
+	got_dot = 0;
+	for(i = 0; i < len; i++) {
+		c = g_kegs_version_str[i];
+		if(c == '.') {
+			got_dot++;
+		}
+		if(got_dot >= 3) {
+			break;
+		}
+		if((c >= '0') && (c <= '9')) {
+			c = c - '0';
+			if(got_dot) {
+				subvers = (subvers << 4) | c;
+				got_dot++;
+			} else {
+				version = (version << 4) | c;
+			}
+		}
+	}
+
+	engine.acc = ((version & 0xff) << 8) | (subvers & 0xff);
+	engine.yreg = 0x01;		// $C06C timer available
 }
 
 void
@@ -2022,23 +2069,29 @@ kegs_vprintf(const char *fmt, va_list ap)
 	return ret;
 }
 
-word32
-must_write(int fd, byte *bufptr, word32 size)
+dword64
+must_write(int fd, byte *bufptr, dword64 dsize)
 {
-	word32	len;
-	int	ret;
+	dword64	dlen;
+	long long ret;
+	word32	this_len;
 
-	len = size;
-	while(len != 0) {
-		ret = (int)write(fd, bufptr, len);
+	dlen = dsize;
+	while(dlen != 0) {
+		// Support Windows64, which can only rd/wr 2GB max per call
+		this_len = (1UL << 30);
+		if(dlen < this_len) {
+			this_len = (word32)dlen;
+		}
+		ret = write(fd, bufptr, this_len);
 		if(ret >= 0) {
-			len -= ret;
+			dlen -= ret;
 			bufptr += ret;
 		} else if((errno != EAGAIN) && (errno != EINTR)) {
 			return 0;		// just get out
 		}
 	}
-	return size;
+	return dsize;
 }
 
 void
@@ -2064,5 +2117,15 @@ kegs_malloc_str(const char *in_str)
 	memcpy(str, in_str, len);
 
 	return str;
+}
+
+dword64
+kegs_lseek(int fd, dword64 offs, int whence)
+{
+#ifdef _WIN32
+	return _lseeki64(fd, offs, whence);
+#else
+	return lseek(fd, offs, whence);
+#endif
 }
 

@@ -1,4 +1,4 @@
-# $KmKId: makefile,v 1.43 2021-12-14 04:44:38+00 kentd Exp $
+# $KmKId: makefile,v 1.48 2025-04-28 15:12:19+00 kentd Exp $
 
 XOPTS_WIN = -Wall -fomit-frame-pointer -march=pentium
 
@@ -37,15 +37,17 @@ kegsmac: $(OBJECTS) $(OBJECTS1) compile_time.o $(SWIFTOBJS)
 	mkdir -p ../KEGSMAC.app/Contents/Resources/Base.lproj/
 	mkdir -p ../KEGSMAC.app/Contents/MacOS
 	mkdir -p ../KEGSMAC.app/Contents/Frameworks
-	PERL cp_kegs_libs kegsmac /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx ../KEGSMAC.app/Contents/Frameworks
+	$(PERL) cp_kegs_libs kegsmac /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx ../KEGSMAC.app/Contents/Frameworks
 	mv kegsmac ../KEGSMAC.app/Contents/MacOS/KEGSMAC
 	echo "APPL????" > ../KEGSMAC.app/Contents/PkgInfo
 	cp -f Info.plist ../KEGSMAC.app/Contents/
 	cp -f $(PROJROOT)/lib/MainMenu.nib ../KEGSMAC.app/Contents/Resources/Base.lproj/
-	#cp -f $(PROJROOT)/lib/kegsicon.icns ../KEGSMAC.app/Contents/Resources/
+	$(PROJROOT)/lib/make_mac_icon $(PROJROOT)/lib/kegsicon.png
+	cp -f kegs.icns ../KEGSMAC.app/Contents/Resources/
+	touch '../KEGSMAC.app/Icon?'
 	#cp -f $(PROJROOT)/lib/2mg.icns ../KEGSMAC.app/Contents/Resources/
 	#cp -f $(PROJROOT)/lib/525.icns ../KEGSMAC.app/Contents/Resources/
-	#touch '../KEGSMAC.app/Icon?'
+
 
 # Linux for X builds:
 xkegs: $(OBJECTS) $(OBJECTS1) compile_time.o
@@ -97,33 +99,13 @@ win32.o: win32.rc
 	$(KMKROOT)/bin/kmkproto $(XOPTS) $*.m > $*.proto
 	echo >> $*.proto
 
-$(PROTO_OUT_base): $(PROTO_FILE_LIST_base) ldvars
-	$(KMKROOT)/bin/kmkproto_head $(PROTO_OUT_base) tmp_protos.h
-	cat /dev/null $(PROTO_FILE_LIST_base) >> tmp_protos.h
-	rm -f $(PROTO_OUT_base)
-	mv tmp_protos.h $(PROTO_OUT_base)
-	cp -f $(PROTO_OUT_base) ..
-
-$(PROTO_OUT_xdriver): $(PROTO_FILE_LIST_xdriver) ldvars
-	$(KMKROOT)/bin/kmkproto_head $(PROTO_OUT_xdriver) tmp_protos.h
-	cat /dev/null $(PROTO_FILE_LIST_xdriver) >> tmp_protos.h
-	rm -f $(PROTO_OUT_xdriver)
-	mv tmp_protos.h $(PROTO_OUT_xdriver)
-	cp -f $(PROTO_OUT_xdriver) ..
-
-$(PROTO_OUT_macsnd_driver): $(PROTO_FILE_LIST_macsnd_driver) ldvars
-	$(KMKROOT)/bin/kmkproto_head $(PROTO_OUT_macsnd_driver) tmp_protos.h
-	cat /dev/null $(PROTO_FILE_LIST_macsnd_driver) >> tmp_protos.h
-	rm -f $(PROTO_OUT_macsnd_driver)
-	mv tmp_protos.h $(PROTO_OUT_macsnd_driver)
-	cp -f $(PROTO_OUT_macsnd_driver) ..
-
-$(PROTO_OUT_pulseaudio_driver): $(PROTO_FILE_LIST_pulseaudio_driver) ldvars
-	$(KMKROOT)/bin/kmkproto_head $(PROTO_OUT_pulseaudio_driver) tmp_protos.h
-	cat /dev/null $(PROTO_FILE_LIST_pulseaudio_driver) >> tmp_protos.h
-	rm -f $(PROTO_OUT_pulseaudio_driver)
-	mv tmp_protos.h $(PROTO_OUT_pulseaudio_driver)
-	cp -f $(PROTO_OUT_pulseaudio_driver) ..
+$(PROTO_OUT): $(PROTO_FILE_LIST) ldvars proto_vars
+	$(KMKROOT)/bin/kmkproto_head $(PROTO_OUT) tmp_protos.h
+	cat /dev/null $(PROTO_FILE_LIST) >> tmp_protos.h
+	rm -f $(PROTO_OUT)
+	mv tmp_protos.h $(PROTO_OUT)
+	kmk_cp_if_diff $(PROTO_OUT) ..
+	rm -f *.proto
 
 
 compile_time.o: $(OBJECTS) $(OBJECTS1)
