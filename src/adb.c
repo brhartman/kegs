@@ -1,4 +1,4 @@
-const char rcsid_adb_c[] = "@(#)$KmKId: adb.c,v 1.114 2023-12-10 02:35:10+00 kentd Exp $";
+const char rcsid_adb_c[] = "@(#)$KmKId: adb.c,v 1.115 2024-01-15 02:54:46+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
@@ -2065,8 +2065,7 @@ adb_physical_key_update(Kimage *kimage_ptr, int raw_a2code, word32 unicode_c,
 			break;
 		case 0x05: /* F5 - Force Refresh */
 			g_status_enable = !g_status_enable;
-			video_update_status_enable(&g_mainwin_kimage);
-			video_set_x_refresh_needed(&g_mainwin_kimage, 1);
+			// video_update() will call video_update_status_enable()
 			break;
 		case 0x06: /* F6 - emulator speed */
 			if(SHIFT_DOWN) {

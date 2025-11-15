@@ -11,7 +11,7 @@
 /************************************************************************/
 
 #ifdef INCLUDE_RCSID_C
-const char rcsid_protos_base_h[] = "@(#)$KmKId: protos_base.h,v 1.159 2023-12-09 17:45:53+00 kentd Exp $";
+const char rcsid_protos_base_h[] = "@(#)$KmKId: protos_base.h,v 1.160 2024-01-15 02:56:13+00 kentd Exp $";
 #endif
 
 #ifdef __GNUC__
@@ -526,7 +526,7 @@ void do_reset(void);
 byte *memalloc_align(int size, int skip_amt, void **alloc_ptr);
 void memory_ptr_init(void);
 int parse_argv(int argc, char **argv, int slashes_to_find);
-int kegs_init(int mdepth);
+int kegs_init(int mdepth, int screen_width, int screen_height, int no_scale_window);
 void load_roms_init_memory(void);
 void initialize_events(void);
 void check_for_one_event_type(int type, word32 mask);
@@ -823,9 +823,8 @@ char *video_get_status_ptr(int line);
 void video_set_x_refresh_needed(Kimage *kimage_ptr, int do_refresh);
 int video_get_active(Kimage *kimage_ptr);
 void video_set_active(Kimage *kimage_ptr, int active);
-void video_set_max_width_height(Kimage *kimage_ptr, int width, int height);
-void video_init(int mdepth);
-void video_init_kimage(Kimage *kimage_ptr, int width, int height);
+void video_init(int mdepth, int screen_width, int screen_height, int no_scale_window);
+void video_init_kimage(Kimage *kimage_ptr, int width, int height, int screen_width, int screen_height);
 void show_a2_line_stuff(void);
 void video_reset(void);
 void video_update(void);
@@ -862,6 +861,9 @@ int video_get_a2_width(Kimage *kimage_ptr);
 int video_get_x_width(Kimage *kimage_ptr);
 int video_get_a2_height(Kimage *kimage_ptr);
 int video_get_x_height(Kimage *kimage_ptr);
+int video_get_x_xpos(Kimage *kimage_ptr);
+int video_get_x_ypos(Kimage *kimage_ptr);
+void video_update_xpos_ypos(Kimage *kimage_ptr, int x_xpos, int x_ypos);
 int video_change_aspect_needed(Kimage *kimage_ptr, int x_width, int x_height);
 void video_update_status_enable(Kimage *kimage_ptr);
 int video_out_query(Kimage *kimage_ptr);

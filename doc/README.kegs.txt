@@ -1,5 +1,5 @@
 
-KEGS: Kent's Emulated GS version 1.33
+KEGS: Kent's Emulated GS version 1.34
 http://kegs.sourceforge.net/
 
 What is this?
@@ -342,8 +342,16 @@ title bar.  To exit full screen mode, move the mouse to the top of the screen,
 and the title bar will reappear, and you can click the green maximize button
 to shrink the window down.
 
+Resizing the KEGS window:
+------------------------
+
 All versions of KEGS allow the window to be resized, so you can make the
 window take up nearly the full screen without being "full screen" mode.
+KEGS will save the window position and size when it updates config.kegs,
+but currently doesn't automatically update config.kegs.  So if you resize
+the window, and then do something which changes config.kegs (inserting or
+ejecting disks always immediately update config.kegs, or selecting the
+F4 menu option "Save changes to config.kegs" will update config.kegs).
 
 
 Joystick Emulation (Mouse, Keypad, or real native joystick):

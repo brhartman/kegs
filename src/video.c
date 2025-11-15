@@ -1,4 +1,4 @@
-const char rcsid_video_c[] = "@(#)$KmKId: video.c,v 1.209 2023-09-26 02:59:16+00 kentd Exp $";
+const char rcsid_video_c[] = "@(#)$KmKId: video.c,v 1.210 2024-01-15 02:57:49+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
@@ -65,6 +65,11 @@ int	g_video_act_margin_top = BASE_MARGIN_TOP;
 int	g_video_act_margin_bottom = BASE_MARGIN_BOTTOM;
 int	g_video_act_width = X_A2_WINDOW_WIDTH;
 int	g_video_act_height = X_A2_WINDOW_HEIGHT;
+int	g_mainwin_width = X_A2_WINDOW_WIDTH;
+int	g_mainwin_height = X_A2_WINDOW_HEIGHT + MAX_STATUS_LINES*16 + 2;
+int	g_mainwin_xpos = 100;
+int	g_mainwin_ypos = 300;
+int	g_video_no_scale_window = 0;
 
 word32	g_palette_change_cnt[2][16];
 int	g_border_sides_refresh_needed = 1;
@@ -407,20 +412,16 @@ video_set_active(Kimage *kimage_ptr, int active)
 }
 
 void
-video_set_max_width_height(Kimage *kimage_ptr, int width, int height)
-{
-	kimage_ptr->x_max_width = width;
-	kimage_ptr->x_max_height = height;
-}
-
-void
-video_init(int mdepth)
+video_init(int mdepth, int screen_width, int screen_height, int no_scale_window)
 {
 	word32	col[4];
 	word32	val0, val1, val2, val3, next_col, next2_col;
 	word32	val, cur_col;
 	int	i, j;
-/* Initialize video system */
+
+// Initialize video system (called one-time only)
+
+	g_video_no_scale_window = no_scale_window;
 
 	for(i = 0; i < 200; i++) {
 		g_a2_line_left_edge[i] = 0;
@@ -456,8 +457,8 @@ video_init(int mdepth)
 		g_slow_mem_ch2[i] = 0;
 	}
 
-	/* create g_dhires_convert[] array */
-	// Look at patent #4786893 for details on VGC and dhr
+	// create g_dhires_convert[] array
+	// TODO: Look at patent #4786893 for details on VGC and dhr
 	for(i = 0; i < 4096; i++) {
 		/* Convert index bits 11:0 where 3:0 is the previous color */
 		/*  and 7:4 is the current color to translate */
@@ -497,9 +498,11 @@ video_init(int mdepth)
 	}
 
 	video_init_kimage(&g_mainwin_kimage, X_A2_WINDOW_WIDTH,
-				X_A2_WINDOW_HEIGHT + MAX_STATUS_LINES*16 + 2);
+				X_A2_WINDOW_HEIGHT + MAX_STATUS_LINES*16 + 2,
+				screen_width, screen_height);
 
-	video_init_kimage(&g_debugwin_kimage, 80*8 + 8 + 8, 25*16 + 8 + 8);
+	video_init_kimage(&g_debugwin_kimage, 80*8 + 8 + 8, 25*16 + 8 + 8,
+				screen_width, screen_height);
 
 	change_display_mode(g_cur_dfcyc);
 	video_reset();
@@ -516,24 +519,72 @@ video_init(int mdepth)
 	fflush(stdout);
 }
 
-void
-video_init_kimage(Kimage *kimage_ptr, int width, int height)
+int
+video_clamp(int value, int min, int max)
 {
+	// Ensure value is >= min and <= max.  If max <= min, return min
+	if(value > max) {
+		value = max;
+	}
+	if(value <= min) {
+		value = min;
+	}
+	return value;
+}
+
+void
+video_init_kimage(Kimage *kimage_ptr, int width, int height,
+			int screen_width, int screen_height)
+{
+	int	x_width, x_height, a2_height, x_xpos, x_ypos;
 	int	i;
+
+	if(screen_width < width) {
+		screen_width = width;
+	}
+	if(screen_height < height) {
+		screen_width = height;
+	}
+	x_width = width;
+	x_height = height;
+	a2_height = height;
+	x_xpos = 100;
+	x_ypos = 300;
+	if(kimage_ptr == &g_mainwin_kimage) {
+		x_width = g_mainwin_width;
+		x_height = g_mainwin_height;
+		x_xpos = g_mainwin_xpos;
+		x_ypos = g_mainwin_ypos;
+
+		// Handle status lines now
+		if(!g_status_enable) {
+			a2_height = g_video_act_margin_top + A2_WINDOW_HEIGHT +
+						g_video_act_margin_bottom;
+		}
+	}
+
+	x_width = video_clamp(x_width, width, screen_width);
+	x_height = video_clamp(x_height, height, screen_height);
+	x_xpos = video_clamp(x_xpos, 0, screen_width - 640);
+	x_ypos = video_clamp(x_ypos, 0, screen_height - 420);
 
 	kimage_ptr->wptr = (word32 *)calloc(1, width * height * 4);
 	kimage_ptr->a2_width_full = width;
 	kimage_ptr->a2_height_full = height;
 	kimage_ptr->a2_width = width;
-	kimage_ptr->a2_height = height;
-	kimage_ptr->x_width = width;
-	kimage_ptr->x_height = height;
+	kimage_ptr->a2_height = a2_height;
+	kimage_ptr->x_width = x_width;
+	kimage_ptr->x_height = x_height;
 	kimage_ptr->x_refresh_needed = 1;
-	kimage_ptr->x_max_width = width;
-	kimage_ptr->x_max_height = height;
+	kimage_ptr->x_max_width = screen_width;
+	kimage_ptr->x_max_height = screen_height;
+	kimage_ptr->x_xpos = x_xpos;
+	kimage_ptr->x_ypos = x_ypos;
 	kimage_ptr->active = 0;
 	kimage_ptr->vbl_of_last_resize = 0;
 	kimage_ptr->c025_val = 0;
+	//printf("Created window, width:%d x_width:%d height:%d x_height:%d\n",
+	//	width, x_width, height, x_height);
 
 	kimage_ptr->scale_width_to_a2 = 0x10000;
 	kimage_ptr->scale_width_a2_to_x = 0x10000;
@@ -544,6 +595,8 @@ video_init_kimage(Kimage *kimage_ptr, int width, int height)
 		kimage_ptr->scale_width[i] = i;
 		kimage_ptr->scale_height[i] = i;
 	}
+
+	video_update_scale(kimage_ptr, x_width, x_height, 1);
 }
 
 void
@@ -2151,6 +2204,32 @@ video_get_x_height(Kimage *kimage_ptr)
 }
 
 int
+video_get_x_xpos(Kimage *kimage_ptr)
+{
+	return kimage_ptr->x_xpos;
+}
+
+int
+video_get_x_ypos(Kimage *kimage_ptr)
+{
+	return kimage_ptr->x_ypos;
+}
+
+void
+video_update_xpos_ypos(Kimage *kimage_ptr, int x_xpos, int x_ypos)
+{
+	x_xpos = video_clamp(x_xpos, 0, kimage_ptr->x_max_width - 640);
+	x_ypos = video_clamp(x_ypos, 0, kimage_ptr->x_max_height - 420);
+	kimage_ptr->x_xpos = x_xpos;
+	kimage_ptr->x_ypos = x_ypos;
+	if(kimage_ptr == &g_mainwin_kimage) {
+		g_mainwin_xpos = x_xpos;
+		g_mainwin_ypos = x_ypos;
+		// printf("Set g_mainwin_xpos:%d, ypos:%d\n", x_xpos, x_ypos);
+	}
+}
+
+int
 video_change_aspect_needed(Kimage *kimage_ptr, int x_width, int x_height)
 {
 	// Return 1 if the passed in height, width do not match the kimage
@@ -2193,6 +2272,7 @@ video_update_status_enable(Kimage *kimage_ptr)
 	printf("new a2_height:%d, x_height:%d\n", kimage_ptr->a2_height,
 							kimage_ptr->x_height);
 #endif
+	//printf("Calling video_update_scale from video_update_status_en\n");
 	video_update_scale(kimage_ptr, kimage_ptr->x_width, height, 0);
 }
 
@@ -2268,8 +2348,8 @@ video_out_data(void *vptr, Kimage *kimage_ptr, int out_width_act,
 	x = rectptr->x;
 	x_width = kimage_ptr->x_width;
 	x_height = kimage_ptr->x_height;
-	if((a2_width != x_width) || (a2_height != x_height)) {
-			// HACK!
+	if(!g_video_no_scale_window &&
+			((a2_width != x_width) || (a2_height != x_height))) {
 #if 0
 		printf("a2_width:%d, x_width:%d, a2_height:%d, x_height:"
 			"%d\n", a2_width, x_width, a2_height, x_height);
@@ -2500,18 +2580,12 @@ video_update_scale(Kimage *kimage_ptr, int out_width, int out_height,
 	int	a2_width, a2_height, exp_width, exp_height;
 	int	i;
 
-	if(out_width > kimage_ptr->x_max_width) {
-		out_width = kimage_ptr->x_max_width;
-	}
-	if(out_width > MAX_SCALE_SIZE) {
-		out_width = MAX_SCALE_SIZE;
-	}
-	if(out_height > kimage_ptr->x_max_height) {
-		out_height = kimage_ptr->x_max_height;
-	}
-	if(out_height > MAX_SCALE_SIZE) {
-		out_height = MAX_SCALE_SIZE;
-	}
+	out_width = video_clamp(out_width, 1, kimage_ptr->x_max_width);
+	out_width = video_clamp(out_width, 1, MAX_SCALE_SIZE);
+
+	out_height = video_clamp(out_height, 1, kimage_ptr->x_max_height);
+	out_height = video_clamp(out_height, 1, MAX_SCALE_SIZE);
+
 	a2_width = kimage_ptr->a2_width;
 	a2_height = kimage_ptr->a2_height;
 	kimage_ptr->vbl_of_last_resize = g_vbl_count;
@@ -2553,6 +2627,12 @@ video_update_scale(Kimage *kimage_ptr, int out_width, int out_height,
 	kimage_ptr->x_width = out_width;
 	kimage_ptr->x_height = out_height;
 	kimage_ptr->x_refresh_needed = 1;
+	if(kimage_ptr == &g_mainwin_kimage) {
+		g_mainwin_width = out_width;
+		g_mainwin_height = out_height;
+		//printf("Set g_mainwin_width=%d, g_mainwin_height=%d\n",
+		//				out_width, out_height);
+	}
 
 	// the per-pixel inc = a2_width / out_width.  Scale by 65536
 	frac_inc = (a2_width * 65536UL) / out_width;

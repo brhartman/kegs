@@ -47,9 +47,9 @@ Apple II video mode is fetched from memory with $C02F bits 6:0 = $58.  So
 the 40 cycles drawing data are when $C02F = $58 through $7f = 40 values.
 
 KEGS currently draws each line of the screen at the moment when $C02F=$58.
-It takes the current Apple II video mode (a combination of the GR mode,
-PAGE2, ANNUNC3, VID80, etc.) and then reads the current value of the video
-memory in banks $E0 and $E1 for the line being drawn, and draws it in an
-internal buffer.  Switching modes or changing video buffer data after
-this point will not affect this line--but will affect the next lines drawn.
+KEGS uses the memory in banks $E0 (and $E1) for the line being drawn,
+but does track the mode changes to handle changes within a line.  Toggling
+the mode ($C050-$C057, for example) in the middle of a line will be drawn
+roughly correctly (it's complex when changing from 80-column to hires,
+for example, one cycle of data may not be shown like the real hardware).
 

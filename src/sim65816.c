@@ -1,4 +1,4 @@
-const char rcsid_sim65816_c[] = "@(#)$KmKId: sim65816.c,v 1.482 2023-12-09 17:43:41+00 kentd Exp $";
+const char rcsid_sim65816_c[] = "@(#)$KmKId: sim65816.c,v 1.484 2024-01-15 02:56:19+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
@@ -81,7 +81,7 @@ int	g_code_yellow = 0;
 int	g_emul_6502_ind_page_cross_bug = 0;
 
 int	g_config_iwm_vbl_count = 0;
-const char g_kegs_version_str[] = "1.33";
+const char g_kegs_version_str[] = "1.34";
 
 dword64	g_last_vbl_dfcyc = 0;
 dword64	g_cur_dfcyc = 1;
@@ -650,7 +650,7 @@ parse_argv(int argc, char **argv, int slashes_to_find)
 }
 
 int
-kegs_init(int mdepth)
+kegs_init(int mdepth, int screen_width, int screen_height, int no_scale_window)
 {
 	g_config_control_panel = 0;
 
@@ -676,7 +676,7 @@ kegs_init(int mdepth)
 
 	clear_halt();
 
-	video_init(mdepth);
+	video_init(mdepth, screen_width, screen_height, no_scale_window);
 
 	sound_init();
 	joystick_init();

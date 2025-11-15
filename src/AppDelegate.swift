@@ -1,4 +1,4 @@
-// $KmKId: AppDelegate.swift,v 1.29 2023-06-16 19:33:11+00 kentd Exp $
+// $KmKId: AppDelegate.swift,v 1.31 2024-01-15 02:58:44+00 kentd Exp $
 
 //	Copyright 2019-2023 by Kent Dickey
 //	This code is covered by the GNU GPL v3
@@ -35,9 +35,11 @@ class Window_info {
 	}
 
 	func create_window() {
-		let width = Int(video_get_a2_width(kimage_ptr))
-		let height = Int(video_get_a2_height(kimage_ptr))
-		let windowRect = NSRect(x: 100, y: 300, width: width,
+		let x_xpos = Int(video_get_x_xpos(kimage_ptr))
+		let x_ypos = Int(video_get_x_ypos(kimage_ptr))
+		let width = Int(video_get_x_width(kimage_ptr))
+		let height = Int(video_get_x_height(kimage_ptr))
+		let windowRect = NSRect(x: x_xpos, y: x_ypos, width: width,
 							height: height)
 		var window : NSWindow!
 		var view : MainView!
@@ -123,7 +125,13 @@ class Window_info {
 							height: a2_height)
 		x_win!.setFrame(newframe, display: true, animate: true)
 		mac_view!.initialize()
-		//video_update_scale(kimage_ptr, x_width, x_height)
+			// Must call initialize for the case where the
+			//  status lines were enabled, we need more lines
+		// print("Call video_update_scale from mac_resize_window\n");
+		video_update_scale(kimage_ptr, Int32(x_win!.frame.width),
+						Int32(x_win!.frame.height), 0)
+		video_update_xpos_ypos(kimage_ptr, Int32(x_win!.frame.origin.x),
+						Int32(x_win!.frame.origin.y))
 		//print("Did mac_resize window to \(a2_width), \(a2_height)" +
 		//	"  frame:\(x_win!.frame.width), " +
 		//				"\(x_win!.frame.height)" +
@@ -131,7 +139,8 @@ class Window_info {
 	}
 
 	func update_window_size(width: Int, height: Int) {
-		//video_update_scale(kimage_ptr, Int32(width), Int32(height));
+		// print("Call video_update_scale from update_window_size\n");
+		video_update_scale(kimage_ptr, Int32(width), Int32(height), 0);
 	}
 }
 
@@ -149,6 +158,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 	}
 	@objc func do_about(_:AnyObject) {
 		print("About")
+		if let ver_str = Bundle.main.infoDictionary?[
+				"CFBundleShortVersionString"] as? String {
+			NSApplication.shared.orderFrontStandardAboutPanel(
+				options: [.applicationVersion: ver_str,
+					.version: "", .applicationName: "KEGS"])
+		}
 	}
 	func applicationDidFinishLaunching(_ aNotification: Notification) {
 		// This is your first real entry point into the app
@@ -182,6 +197,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 		adb_kbd_repeat_off()
 		adb_mainwin_focus(Int32(0))
 		CGDisplayShowCursor(CGMainDisplayID())
+	}
+	func windowDidMove(_ notification: Notification) {
+		//print("DidMove")
+		if let w = notification.object as? NSWindow {
+			let win_info = find_win_info(w)
+			video_update_xpos_ypos(win_info.kimage_ptr,
+				Int32(w.frame.origin.x),
+				Int32(w.frame.origin.y))
+		}
 	}
 
 	func windowWillResize(_ window: NSWindow, to frameSize: NSSize)
@@ -283,12 +307,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     
 	func main_init() {
 		var kimage_ptr : UnsafeMutablePointer<Kimage>!
+		var rect = NSRect.zero
 
 		let argc = CommandLine.argc
 		let argv = CommandLine.unsafeArgv
 		parse_argv(argc, argv, 3);
 
-		kegs_init(24)
+		rect.size.width = 2560
+		rect.size.height = 1440
+		if let screen = NSScreen.main {
+			rect = screen.frame
+		}
+		kegs_init(24, Int32(rect.size.width), Int32(rect.size.height),
+						Int32(1))
 		if(Context_draw) {
 			video_set_blue_mask(UInt32(0x0000ff))
 			video_set_green_mask(UInt32(0x00ff00))

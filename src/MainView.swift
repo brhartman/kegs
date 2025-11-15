@@ -1,4 +1,4 @@
-// $KmKId: MainView.swift,v 1.40 2023-12-10 02:34:34+00 kentd Exp $
+// $KmKId: MainView.swift,v 1.41 2024-01-15 02:55:19+00 kentd Exp $
 
 //	Copyright 2019-2023 by Kent Dickey
 //	This code is covered by the GNU GPL v3
@@ -289,7 +289,10 @@ class MainView: NSView {
 						count: height * width)
 		rawData = bitmapData.bindMemory(to: UInt32.self,
 						capacity: height * width)
-		video_update_scale(kimage_ptr, Int32(width), Int32(height),
+		//print("Calling video_update_scale from MainViewinitialize()")
+		let x_width = Int(video_get_x_width(kimage_ptr))
+		let x_height = Int(video_get_x_height(kimage_ptr))
+		video_update_scale(kimage_ptr, Int32(x_width), Int32(x_height),
 								Int32(1))
 		if(Context_draw) {
 			video_set_alpha_mask(UInt32(0xff000000))

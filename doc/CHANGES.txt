@@ -1,4 +1,10 @@
 
+Changes in KEGS v1.34 since v1.33 (01/15/24)
+- Fix bug where no config.kegs file could sometimes cause a crash.
+- Richard Bennett fixes:  Change menus to be retina, and add About dialog 
+- Save the main window size and position in config.kegs (but not automatically)
+
+
 Changes in KEGS v1.33 since v1.32 (12/10/23)
 - Add command line argument support to set any disk (-s5d1=Data.po
 	or -s7d12 bigdisk.hdv) or any knob that is listed in config.kegs.

@@ -1,4 +1,4 @@
-const char rcsid_xdriver_c[] = "@(#)$KmKId: xdriver.c,v 1.241 2023-12-10 02:34:14+00 kentd Exp $";
+const char rcsid_xdriver_c[] = "@(#)$KmKId: xdriver.c,v 1.242 2024-01-15 02:57:09+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
@@ -104,7 +104,7 @@ int g_depth_attempt_list[] = { 24, 16, 15 };
 #define X_EVENT_LIST_ALL_WIN						\
 	(ExposureMask | ButtonPressMask | ButtonReleaseMask |		\
 	OwnerGrabButtonMask | KeyPressMask | KeyReleaseMask |		\
-	KeymapStateMask | ColormapChangeMask | FocusChangeMask)
+	KeymapStateMask | FocusChangeMask)
 
 #define X_BASE_WIN_EVENT_LIST						\
 	(X_EVENT_LIST_ALL_WIN | PointerMotionMask | ButtonMotionMask |	\
@@ -237,7 +237,7 @@ main(int argc, char **argv)
 
 	mdepth = x_video_get_mdepth();
 
-	ret = kegs_init(mdepth);
+	ret = kegs_init(mdepth, g_x_max_width, g_x_max_height, 0);
 	printf("kegs_init done\n");
 	if(ret) {
 		printf("kegs_init ret: %d, stopping\n", ret);
@@ -530,8 +530,8 @@ x_init_window(Window_info *win_info_ptr, Kimage *kimage_ptr, char *name_str)
 {
 	int	width, height, x_use_shmem, ret;
 
-	height = video_get_a2_height(kimage_ptr);
-	width = video_get_a2_width(kimage_ptr);
+	height = video_get_x_height(kimage_ptr);
+	width = video_get_x_width(kimage_ptr);
 
 	win_info_ptr->seginfo = 0;
 	win_info_ptr->xim = 0;
@@ -579,7 +579,7 @@ x_create_window(Window_info *win_info_ptr)
 	Window	x_win;
 	GC	x_winGC;
 	word32	create_win_list;
-	int	width, height;
+	int	width, height, x_xpos, x_ypos;
 
 	win_attr.event_mask = X_A2_WIN_EVENT_LIST;
 	win_attr.colormap = g_default_colormap;
@@ -598,12 +598,14 @@ x_create_window(Window_info *win_info_ptr)
 	create_win_list = CWEventMask | CWBackingStore | CWCursor;
 	create_win_list |= CWColormap | CWBorderPixel | CWBackPixel;
 
+	x_xpos = video_get_x_xpos(win_info_ptr->kimage_ptr);
+	x_ypos = video_get_x_ypos(win_info_ptr->kimage_ptr);
 	width = win_info_ptr->width_req;
 	height = win_info_ptr->main_height;
 
 	x_win = XCreateWindow(g_display, RootWindow(g_display, g_screen_num),
-		0, 0, width, height, 0, g_x_screen_depth, InputOutput, g_vis,
-		create_win_list, &win_attr);
+		x_xpos, x_ypos, width, height, 0, g_x_screen_depth,
+		InputOutput, g_vis, create_win_list, &win_attr);
 	vid_printf("x_win = %d, width:%d, height:%d\n", (int)x_win, width,
 									height);
 
@@ -665,8 +667,6 @@ x_allocate_window_data(Window_info *win_info_ptr)
 
 	width = g_x_max_width;
 	height = g_x_max_height;
-	video_set_max_width_height(win_info_ptr->kimage_ptr, width, height);
-
 	if(win_info_ptr->x_use_shmem) {
 		win_info_ptr->x_use_shmem = 0;		// Default to no shmem
 		get_shm(win_info_ptr, width, height);
@@ -1094,7 +1094,7 @@ x_input_events()
 	Window_info *win_info_ptr;
 	char	*str;
 	int	len, motion, key_or_mouse, refresh_needed, buttons, hide, warp;
-	int	width, height, resp_property, match;
+	int	width, height, resp_property, match, x_xpos, x_ypos;
 	int	i;
 
 	str = 0;
@@ -1186,8 +1186,6 @@ x_input_events()
 			break;
 		case KeymapNotify:
 			break;
-		case ColormapNotify:
-			break;
 		case DestroyNotify:
 			win_info_ptr = x_find_xwin(ev.xdestroywindow.window);
 			video_set_active(win_info_ptr->kimage_ptr, 0);
@@ -1221,6 +1219,10 @@ x_input_events()
 #endif
 			video_update_scale(win_info_ptr->kimage_ptr, width,
 								height, 0);
+			x_xpos = ev.xconfigure.x;
+			x_ypos = ev.xconfigure.y;
+			video_update_xpos_ypos(win_info_ptr->kimage_ptr,
+							x_xpos, x_ypos);
 			break;
 		case SelectionRequest:
 			//printf("SelectionRequest received\n");

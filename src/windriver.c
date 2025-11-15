@@ -1,4 +1,4 @@
-const char rcsid_windriver_c[] = "@(#)$KmKId: windriver.c,v 1.24 2023-06-21 21:54:56+00 kentd Exp $";
+const char rcsid_windriver_c[] = "@(#)$KmKId: windriver.c,v 1.25 2024-01-15 02:56:45+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
@@ -45,6 +45,8 @@ typedef struct windowinfo {
 	int	mdepth;
 	int	active;
 	int	pixels_per_line;
+	int	x_xpos;
+	int	x_ypos;
 	int	width;
 	int	height;
 	int	extra_width;
@@ -379,6 +381,24 @@ win_event_destroy(HWND hwnd)
 }
 
 void
+win_event_move(HWND hwnd, WPARAM wParam, LPARAM lParam)
+{
+	Window_info *win_info_ptr;
+	int	x_xpos, x_ypos;
+
+	// These WM_MOVE events indicate the window is being moved
+
+	win_info_ptr = win_find_win_info_ptr(hwnd);
+	if(!win_info_ptr) {
+		return;
+	}
+	// printf("WM_MOVE: %04x %08x\n", (word32)wParam, (word32)lParam);
+	x_xpos = lParam & 0xffff;
+	x_ypos = (lParam >> 16) & 0xffff;
+	video_update_xpos_ypos(win_info_ptr->kimage_ptr, x_xpos, x_ypos);
+}
+
+void
 win_event_size(HWND hwnd, WPARAM wParam, LPARAM lParam)
 {
 	Window_info *win_info_ptr;
@@ -519,6 +539,9 @@ win_event_handler(HWND hwnd, UINT umsg, WPARAM wParam, LPARAM lParam)
 	case WM_PAINT:
 		win_event_redraw(hwnd);
 		break;
+	case WM_MOVE:
+		win_event_move(hwnd, wParam, lParam);
+		break;
 	case WM_SIZE:
 		win_event_size(hwnd, wParam, lParam);
 		break;
@@ -577,7 +600,13 @@ main(int argc, char **argv)
 	video_set_blue_mask(0x0000ff);
 	video_set_green_mask(0x00ff00);
 	video_set_red_mask(0xff0000);
-	ret = kegs_init(mdepth);
+
+	g_win_max_width = GetSystemMetrics(SM_CXSCREEN);
+	g_win_max_height = GetSystemMetrics(SM_CYSCREEN);
+	vid_printf("g_win_max_width:%d, g_win_max_height:%d\n",
+					g_win_max_width, g_win_max_height);
+
+	ret = kegs_init(mdepth, g_win_max_width, g_win_max_height, 0);
 	printf("kegs_init done\n");
 	if(ret) {
 		printf("kegs_init ret: %d, stopping\n", ret);
@@ -681,11 +710,6 @@ win_video_init(int mdepth)
 		exit(1);
 	}
 
-	g_win_max_width = GetSystemMetrics(SM_CXSCREEN);
-	g_win_max_height = GetSystemMetrics(SM_CYSCREEN);
-	printf("g_win_max_width:%d, g_win_max_height:%d\n", g_win_max_width,
-							g_win_max_height);
-
 	win_init_window(&g_mainwin_info, video_get_kimage(0), "KEGS", mdepth);
 	win_init_window(&g_debugwin_info, video_get_kimage(1),
 						"KEGS Debugger", mdepth);
@@ -697,10 +721,13 @@ void
 win_init_window(Window_info *win_info_ptr, Kimage *kimage_ptr, char *name_str,
 							int mdepth)
 {
-	int	height, width;
+	int	height, width, x_xpos, x_ypos;
 
-	height = video_get_a2_height(kimage_ptr);
-	width = video_get_a2_width(kimage_ptr);
+	height = video_get_x_height(kimage_ptr);
+	width = video_get_x_width(kimage_ptr);
+
+	x_xpos = video_get_x_xpos(kimage_ptr);
+	x_ypos = video_get_x_ypos(kimage_ptr);
 
 	win_info_ptr->win_hwnd = 0;
 	win_info_ptr->win_dc = 0;
@@ -715,6 +742,8 @@ win_init_window(Window_info *win_info_ptr, Kimage *kimage_ptr, char *name_str,
 	win_info_ptr->mdepth = mdepth;
 	win_info_ptr->active = 0;
 	win_info_ptr->pixels_per_line = width;
+	win_info_ptr->x_xpos = x_xpos;
+	win_info_ptr->x_ypos = x_ypos;
 	win_info_ptr->width = width;
 	win_info_ptr->height = height;
 }
@@ -743,8 +772,8 @@ win_create_window(Window_info *win_info_ptr)
 	//  calculate this info for us
 	w_flags = WS_TILED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX |
 								WS_SIZEBOX;
-	rect.top = 0;
 	rect.left = 0;
+	rect.top = 0;
 	rect.right = width;
 	rect.bottom = height;
 	(void)AdjustWindowRect(&rect, w_flags, 0);
@@ -753,12 +782,11 @@ win_create_window(Window_info *win_info_ptr)
 	win_info_ptr->extra_width = extra_width;
 	win_info_ptr->extra_height = extra_height;
 	win_hwnd = CreateWindow("kegswin", win_info_ptr->name_str, w_flags,
-		CW_USEDEFAULT, CW_USEDEFAULT, width + extra_width,
+		win_info_ptr->x_xpos, win_info_ptr->x_ypos, width + extra_width,
 		height + extra_height, NULL, NULL, GetModuleHandle(NULL), NULL);
 	win_info_ptr->win_hwnd = win_hwnd;
 	win_info_ptr->active = 0;
-	video_set_max_width_height(kimage_ptr, g_win_max_width,
-							g_win_max_height);
+
 	video_set_active(kimage_ptr, 1);
 	video_update_scale(kimage_ptr, win_info_ptr->width,
 						win_info_ptr->height, 1);

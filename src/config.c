@@ -1,4 +1,4 @@
-const char rcsid_config_c[] = "@(#)$KmKId: config.c,v 1.158 2023-12-11 03:18:18+00 kentd Exp $";
+const char rcsid_config_c[] = "@(#)$KmKId: config.c,v 1.162 2024-01-15 02:55:41+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
@@ -65,6 +65,10 @@ extern int g_swap_paddles;
 extern int g_invert_paddles;
 extern int g_voc_enable;
 extern int g_status_enable;
+extern int g_mainwin_width;
+extern int g_mainwin_height;
+extern int g_mainwin_xpos;
+extern int g_mainwin_ypos;
 
 extern int g_screen_index[];
 extern word32 g_full_refresh_needed;
@@ -306,6 +310,10 @@ Cfg_menu g_cfg_serial_menu[] = {
 Cfg_menu g_cfg_video_menu[] = {
 { "Force X-windows display depth", KNMP(g_force_depth), CFGTYPE_INT },
 { "Enable VOC,0,Disabled,1,Enabled", KNMP(g_voc_enable), CFGTYPE_INT },
+{ "Default Main Window width", KNMP(g_mainwin_width), CFGTYPE_INT },
+{ "Default Main Window height", KNMP(g_mainwin_height), CFGTYPE_INT },
+{ "Main Window X position", KNMP(g_mainwin_xpos), CFGTYPE_INT },
+{ "Main Window Y position", KNMP(g_mainwin_ypos), CFGTYPE_INT },
 { "3200 Color Enable,0,Auto (Full if fast enough),1,Full (Update every line),"
 	"8,Off (Update video every 8 lines)",
 		KNMP(g_video_line_update_interval), CFGTYPE_INT },
@@ -322,7 +330,7 @@ Cfg_menu g_cfg_main_menu[] = {
 { "ROM File Selection", g_cfg_rom_menu, 0, 0, CFGTYPE_MENU },
 { "Character ROM Selection", g_cfg_charrom_menu, 0, 0, CFGTYPE_MENU },
 { "Serial Port Configuration", g_cfg_serial_menu, 0, 0, CFGTYPE_MENU },
-{ "Video Setting", g_cfg_video_menu, 0, 0, CFGTYPE_MENU },
+{ "Video Settings", g_cfg_video_menu, 0, 0, CFGTYPE_MENU },
 { "Auto-update config.kegs,0,Manual,1,Immediately",
 		KNMP(g_config_kegs_auto_update), CFGTYPE_INT },
 { "Speed,0,Unlimited,1,1.0MHz,2,2.8MHz,3,8.0MHz (Zip)",
@@ -372,7 +380,9 @@ Cfg_listhdr g_cfg_partitionlist = { 0 };
 int g_cfg_file_pathfield = 0;
 
 const char *g_kegs_rom_names[] = { "ROM", "ROM", "ROM.01", "ROM.03",
-	"APPLE2GS.ROM", "APPLE2GS.ROM2", "xgs.rom", "XGS.ROM", "Rom03gd", 0 };
+	"APPLE2GS.ROM", "APPLE2GS.ROM2", "xgs.rom", "XGS.ROM", "Rom03gd",
+	"342-0077-b", // MAME ROM.01
+	0 };
 	/* First entry is special--it will be overwritten by g_cfg_rom_path */
 
 const char *g_kegs_c1rom_names[] = { 0 };
@@ -1310,7 +1320,7 @@ config_parse_config_kegs_file()
 	if(fd >= 0) {
 		dsize = cfg_get_fd_size(fd);
 	}
-	if((fd < 0) || (dsize == 0) || (dsize >= (1 << 30))) {
+	if((fd < 0) || (dsize >= (1 << 30))) {
 		fatal_printf("cannot open config.kegs at %s, or it is too "
 			"large!  Stopping!\n", g_config_kegs_name);
 		my_exit(3);
@@ -1373,13 +1383,15 @@ cfg_parse_one_line(char *buf, int line)
 	int	i;
 
 	// warning: modifies memory of bufptr (turns spaces to nulls)
+	if(line) {		// Avoid unused parameter warning
+	}
 
 	len = (int)strlen(buf);
 	if(len <= 1) {		// Not a valid line, just get out
 		return;
 	}
 
-	printf("disk_conf[%d]: %s\n", line, buf);
+	// printf("disk_conf[%d]: %s\n", line, buf);
 	if(buf[0] == '#') {
 		iwm_printf("Skipping comment\n");
 		return;
@@ -1411,8 +1423,8 @@ cfg_parse_one_line(char *buf, int line)
 	}
 
 	// find "name" as first contiguous string
-	printf("...parse_option: line %d, %s (%s) len:%d\n", line, buf,
-							&buf[pos], len);
+	//printf("...parse_option: line %d, %s (%s) len:%d\n", line, buf,
+	//						&buf[pos], len);
 
 	nameptr = &buf[pos];
 	while(pos < len) {

@@ -1,5 +1,5 @@
 #ifdef INCLUDE_RCSID_C
-const char rcsid_defc_h[] = "@(#)$KmKId: defc.h,v 1.140 2023-09-23 17:53:43+00 kentd Exp $";
+const char rcsid_defc_h[] = "@(#)$KmKId: defc.h,v 1.141 2024-01-15 02:56:04+00 kentd Exp $";
 #endif
 
 /************************************************************************/
@@ -164,6 +164,8 @@ STRUCT(Kimage) {
 	int	x_refresh_needed;
 	int	x_max_width;
 	int	x_max_height;
+	int	x_xpos;
+	int	x_ypos;
 	int	active;
 	word32	vbl_of_last_resize;
 	word32	c025_val;
