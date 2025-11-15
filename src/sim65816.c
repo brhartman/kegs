@@ -1120,15 +1120,13 @@ run_a2_one_vbl()
 	g_recip_projected_pmhz_fast.dplus_x_minus_1 = (dword64)
 				((1.98 - (1.0/2.8)) * 0x10000);
 
-	g_recip_projected_pmhz_x10.plus_1 = (1.0 / 28.0);
-	g_recip_projected_pmhz_x10.plus_2 = (2.0 / 28.0);
-	g_recip_projected_pmhz_x10.plus_3 = (3.0 / 28.0);
-	g_recip_projected_pmhz_x10.plus_x_minus_1 = 1.01 - (1.0/28.0);
+	g_recip_projected_pmhz_x10.dplus_1 = (dword64)(0x10000 / (2.8 * 10.0));
+	g_recip_projected_pmhz_x10.dplus_x_minus_1 = (dword64)
+				((1.98 - (1.0/(2.8 * 10.0))) * 0x10000);
 
-	g_recip_projected_pmhz_x100.plus_1 = (1.0 / 280.0);
-	g_recip_projected_pmhz_x100.plus_2 = (2.0 / 280.0);
-	g_recip_projected_pmhz_x100.plus_3 = (3.0 / 280.0);
-	g_recip_projected_pmhz_x100.plus_x_minus_1 = 1.01 - (1.0/280.0);
+	g_recip_projected_pmhz_x100.dplus_1 = (dword64)(0x10000 / (2.8 * 100.0));
+	g_recip_projected_pmhz_x100.dplus_x_minus_1 = (dword64)
+				((1.98 - (1.0/(2.8 * 100.0))) * 0x10000);
 
 	zip_speed_0tof = g_zipgs_reg_c05a & 0xf0;
 	setup_zip_speeds();
