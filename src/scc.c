@@ -1,8 +1,8 @@
-const char rcsid_scc_c[] = "@(#)$KmKId: scc.c,v 1.70 2023-11-12 22:34:28+00 kentd Exp $";
+const char rcsid_scc_c[] = "@(#)$KmKId: scc.c,v 1.74 2025-04-29 22:17:05+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2023 by Kent Dickey		*/
+/*			Copyright 2002-2025 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -91,6 +91,7 @@ scc_init()
 		scc_ptr->modem_mode = 0;
 		scc_ptr->modem_plus_mode = 0;
 		scc_ptr->modem_s0_val = 0;
+		scc_ptr->modem_s2_val = '+';
 		scc_ptr->modem_cmd_len = 0;
 		scc_ptr->modem_out_portnum = 23;
 		scc_ptr->modem_cmd_str[0] = 0;
@@ -124,7 +125,7 @@ scc_reset()
 		scc_ptr->in_wrptr = 0;
 		scc_ptr->out_rdptr = 0;
 		scc_ptr->out_wrptr = 0;
-		scc_ptr->dcd = 1;
+		scc_ptr->dcd = 1 - i;		// 1 for slot 1, 0 for slot 2
 		scc_ptr->wantint_rx = 0;
 		scc_ptr->wantint_tx = 0;
 		scc_ptr->wantint_zerocnt = 0;
@@ -582,6 +583,7 @@ scc_do_event(dword64 dfcyc, int type)
 	} else if(type == SCC_RX_EVENT) {
 		scc_ptr->rx_event_pending = 0;
 		scc_maybe_rx_event(dfcyc, port);
+		scc_maybe_rx_int(port);
 	} else {
 		halt_printf("scc_do_event: %08x!\n", type);
 	}
@@ -843,6 +845,9 @@ scc_write_reg(dword64 dfcyc, int port, word32 val)
 		scc_ptr->reg[regnum] = val;
 		if(changed_bits & 0x60) {
 			scc_regen_clocks(port);
+		}
+		if(changed_bits & 0x80) {
+			scc_printf("SCC port %d DTR:%d\n", port, val & 0x80);
 		}
 		return;
 	case 6: /* wr6 */
@@ -1181,7 +1186,7 @@ scc_maybe_rx_int(int port)
 		return;
 	}
 	rx_int_mode = (scc_ptr->reg[1] >> 3) & 0x3;
-	if(rx_int_mode == 1 || rx_int_mode == 2) {
+	if((rx_int_mode == 1) || (rx_int_mode == 2)) {
 		scc_ptr->wantint_rx = 1;
 	}
 	scc_evaluate_ints(port);
@@ -1223,6 +1228,7 @@ scc_maybe_tx_event(dword64 dfcyc, int port)
 		scc_ptr->tx_buf_empty = 0;
 	} else {
 		/* nothing pending, see ints on */
+		scc_ptr->tx_buf_empty = 0;
 		scc_evaluate_ints(port);
 		tx_dcycs = scc_ptr->tx_dcycs;
 		scc_ptr->tx_event_pending = 1;
@@ -1262,9 +1268,7 @@ void
 scc_add_to_readbuf(dword64 dfcyc, int port, word32 val)
 {
 	Scc	*scc_ptr;
-	int	in_wrptr;
-	int	in_wrptr_next;
-	int	in_rdptr;
+	int	in_wrptr, in_wrptr_next, in_rdptr, safe_val;
 
 	scc_ptr = &(g_scc[port]);
 
@@ -1277,8 +1281,12 @@ scc_add_to_readbuf(dword64 dfcyc, int port, word32 val)
 	if(in_wrptr_next != in_rdptr) {
 		scc_ptr->in_buf[in_wrptr] = val;
 		scc_ptr->in_wrptr = in_wrptr_next;
-		scc_printf("scc in port[%d] add char 0x%02x, %d,%d != %d\n",
-				port, val, in_wrptr, in_wrptr_next, in_rdptr);
+		safe_val = val & 0x7f;
+		if((safe_val < 0x20) || (safe_val >= 0x7f)) {
+			safe_val = '.';
+		}
+		scc_printf("scc in port[%d] add 0x%02x (%c), %d,%d != %d\n",
+			port, val, safe_val, in_wrptr, in_wrptr_next, in_rdptr);
 		g_scc_overflow = 0;
 	} else {
 		if(g_scc_overflow == 0) {
@@ -1289,6 +1297,7 @@ scc_add_to_readbuf(dword64 dfcyc, int port, word32 val)
 	}
 
 	scc_maybe_rx_event(dfcyc, port);
+	scc_maybe_rx_int(port);
 }
 
 void
@@ -1318,12 +1327,11 @@ void
 scc_transmit(dword64 dfcyc, int port, word32 val)
 {
 	Scc	*scc_ptr;
-	int	out_wrptr;
-	int	out_rdptr;
+	int	out_wrptr, out_rdptr;
 
 	scc_ptr = &(g_scc[port]);
 
-	// printf("scc_transmit port:%d val:%02x\n", port, val);
+	// printf("scc_transmit port:%d val:%02x \n", port, val);
 	/* See if port initialized, if not, do so now */
 	if(scc_is_port_closed(dfcyc, port)) {
 		printf("  port %d is closed, cur_state:%d\n", port,

@@ -1,8 +1,8 @@
-const char rcsid_adb_c[] = "@(#)$KmKId: adb.c,v 1.115 2024-01-15 02:54:46+00 kentd Exp $";
+const char rcsid_adb_c[] = "@(#)$KmKId: adb.c,v 1.116 2024-09-15 13:56:12+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2023 by Kent Dickey		*/
+/*			Copyright 2002-2024 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/

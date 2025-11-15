@@ -1,8 +1,8 @@
-const char rcsid_woz_c[] = "@(#)$KmKId: woz.c,v 1.32 2023-09-05 01:32:43+00 kentd Exp $";
+const char rcsid_woz_c[] = "@(#)$KmKId: woz.c,v 1.34 2025-01-07 16:45:35+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2023 by Kent Dickey		*/
+/*			Copyright 2002-2025 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -1035,7 +1035,7 @@ woz_reparse_woz(Disk *dsk)
 
 	dsk->wozinfo_ptr = wozinfo_ptr;
 	if(!dsk->raw_data && dsk->write_through_to_unix) {
-		ftruncate(dsk->fd, wozinfo_ptr->woz_size);
+		(void)!ftruncate(dsk->fd, wozinfo_ptr->woz_size);
 		(void)cfg_write_to_fd(dsk->fd, wozinfo_ptr->wozptr, 0,
 							wozinfo_ptr->woz_size);
 		printf("did ftruncate and write of WOZ to %s\n", dsk->name_ptr);

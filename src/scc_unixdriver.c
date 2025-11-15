@@ -1,8 +1,8 @@
-const char rcsid_scc_macdriver_c[] = "@(#)$KmKId: scc_unixdriver.c,v 1.2 2023-08-28 18:10:41+00 kentd Exp $";
+const char rcsid_scc_macdriver_c[] = "@(#)$KmKId: scc_unixdriver.c,v 1.4 2025-01-07 16:45:35+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2023 by Kent Dickey		*/
+/*			Copyright 2002-2025 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -143,7 +143,7 @@ scc_serial_unix_fill_readbuf(dword64 dfcyc, int port, int space_left)
 {
 	byte	tmp_buf[256];
 	Scc	*scc_ptr;
-	int	fd, ret;
+	int	fd, ret, flags, dcd;
 	int	i;
 
 	scc_ptr = &(g_scc[port]);
@@ -162,6 +162,19 @@ scc_serial_unix_fill_readbuf(dword64 dfcyc, int port, int space_left)
 			scc_add_to_readbuf(dfcyc, port, tmp_buf[i]);
 		}
 	}
+	flags = 0;
+	dcd = 0;
+
+#if defined(TIOCMGET) && defined(TIOCM_CAR)
+	ret = ioctl(fd, TIOCMGET, &flags);
+	if(ret == 0) {
+		dcd = 0;
+		if(flags & TIOCM_CAR) {		// DCD
+			dcd = 1;
+		}
+		scc_ptr->dcd = dcd;
+	}
+#endif
 }
 
 void

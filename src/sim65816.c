@@ -1,8 +1,8 @@
-const char rcsid_sim65816_c[] = "@(#)$KmKId: sim65816.c,v 1.484 2024-01-15 02:56:19+00 kentd Exp $";
+const char rcsid_sim65816_c[] = "@(#)$KmKId: sim65816.c,v 1.491 2025-04-27 18:03:43+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2023 by Kent Dickey		*/
+/*			Copyright 2002-2025 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -81,7 +81,7 @@ int	g_code_yellow = 0;
 int	g_emul_6502_ind_page_cross_bug = 0;
 
 int	g_config_iwm_vbl_count = 0;
-const char g_kegs_version_str[] = "1.34";
+const char g_kegs_version_str[] = "1.38";
 
 dword64	g_last_vbl_dfcyc = 0;
 dword64	g_cur_dfcyc = 1;
@@ -415,6 +415,8 @@ do_reset()
 	change_display_mode(g_cur_dfcyc);
 
 	g_irq_pending = 0;
+	g_code_yellow = 0;
+	g_code_red = 0;
 
 	engine.kpc = get_memory16_c(0x00fffc);
 

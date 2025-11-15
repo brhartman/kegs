@@ -1,4 +1,4 @@
-# $KmKId: makefile,v 1.47 2023-04-01 14:20:47+00 kentd Exp $
+# $KmKId: makefile,v 1.48 2025-04-28 15:12:19+00 kentd Exp $
 
 XOPTS_WIN = -Wall -fomit-frame-pointer -march=pentium
 
@@ -42,10 +42,12 @@ kegsmac: $(OBJECTS) $(OBJECTS1) compile_time.o $(SWIFTOBJS)
 	echo "APPL????" > ../KEGSMAC.app/Contents/PkgInfo
 	cp -f Info.plist ../KEGSMAC.app/Contents/
 	cp -f $(PROJROOT)/lib/MainMenu.nib ../KEGSMAC.app/Contents/Resources/Base.lproj/
-	#cp -f $(PROJROOT)/lib/kegsicon.icns ../KEGSMAC.app/Contents/Resources/
+	$(PROJROOT)/lib/make_mac_icon $(PROJROOT)/lib/kegsicon.png
+	cp -f kegs.icns ../KEGSMAC.app/Contents/Resources/
+	touch '../KEGSMAC.app/Icon?'
 	#cp -f $(PROJROOT)/lib/2mg.icns ../KEGSMAC.app/Contents/Resources/
 	#cp -f $(PROJROOT)/lib/525.icns ../KEGSMAC.app/Contents/Resources/
-	#touch '../KEGSMAC.app/Icon?'
+
 
 # Linux for X builds:
 xkegs: $(OBJECTS) $(OBJECTS1) compile_time.o

@@ -1,8 +1,8 @@
-const char rcsid_xdriver_c[] = "@(#)$KmKId: xdriver.c,v 1.242 2024-01-15 02:57:09+00 kentd Exp $";
+const char rcsid_xdriver_c[] = "@(#)$KmKId: xdriver.c,v 1.244 2025-01-07 16:40:09+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2023 by Kent Dickey		*/
+/*			Copyright 2002-2025 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -287,7 +287,7 @@ void
 x_try_xset_r()
 {
 	/* attempt "xset r" */
-	(void)system("xset r");
+	(void)!system("xset r");
 	xdriver_end();
 	exit(5);
 }

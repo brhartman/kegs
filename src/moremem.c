@@ -1,8 +1,8 @@
-const char rcsid_moremem_c[] = "@(#)$KmKId: moremem.c,v 1.304 2023-11-19 01:49:41+00 kentd Exp $";
+const char rcsid_moremem_c[] = "@(#)$KmKId: moremem.c,v 1.306 2024-09-15 13:56:12+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2023 by Kent Dickey		*/
+/*			Copyright 2002-2024 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -2161,7 +2161,8 @@ c3xx_read(dword64 dfcyc, word32 loc)
 		// SLOTC3ROM is not set:  Set INTC8ROM
 		set_statereg(dfcyc, g_c068_statereg | 0x400);
 	}
-	if(((g_c02d_int_crom & 8) == 0) || (g_c068_statereg & 1)) {
+	if(((g_c02d_int_crom & 8) == 0) || (g_c068_statereg & 1) ||
+							(g_rom_version == 0)) {
 		// Access ROM for slot 3
 		return g_rom_fc_ff_ptr[0x3c300 + (loc & 0xff)];
 	}

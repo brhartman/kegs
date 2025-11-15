@@ -1,8 +1,8 @@
-const char rcsid_smartport_c[] = "@(#)$KmKId: smartport.c,v 1.60 2023-11-22 18:34:49+00 kentd Exp $";
+const char rcsid_smartport_c[] = "@(#)$KmKId: smartport.c,v 1.61 2024-09-15 13:53:46+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2023 by Kent Dickey		*/
+/*			Copyright 2002-2024 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -804,7 +804,7 @@ do_c700(word32 ret)
 	if(ret != 0) {
 		printf("Failure reading boot disk in s7d1, trying slot 5!\n");
 		engine.kpc = 0xc500;		// Try to boot slot 5
-		if(slot == 5) {
+		if((slot == 5) || (g_rom_version == 0)) {
 			engine.kpc = 0xc600;	// Try to boot slot 6
 		}
 	}

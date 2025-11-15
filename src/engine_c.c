@@ -1,8 +1,8 @@
-const char rcsid_engine_c_c[] = "@(#)$KmKId: engine_c.c,v 1.97 2023-11-19 01:49:10+00 kentd Exp $";
+const char rcsid_engine_c_c[] = "@(#)$KmKId: engine_c.c,v 1.99 2025-04-27 18:54:08+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2023 by Kent Dickey		*/
+/*			Copyright 2002-2025 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -810,15 +810,18 @@ get_remaining_operands(word32 addr, word32 opcode, word32 psr,
 		break;		/* 1 arg, already done */
 	case 2:
 		GET_MEMORY16(addrp1, arg, 1);
+		dfcyc -= dplus_1;
 		break;
 	case 3:
 		GET_MEMORY24(addrp1, arg, 1);
+		dfcyc = dfcyc - dplus_1 - dplus_1;
 		break;
 	case 4:
 		if(psr & 0x20) {
 			GET_MEMORY8(addrp1, arg);
 		} else {
 			GET_MEMORY16(addrp1, arg, 1);
+			dfcyc -= dplus_1;
 		}
 		break;
 	case 5:
@@ -826,6 +829,7 @@ get_remaining_operands(word32 addr, word32 opcode, word32 psr,
 			GET_MEMORY8(addrp1, arg);
 		} else {
 			GET_MEMORY16(addrp1, arg, 1);
+			dfcyc -= dplus_1;
 		}
 		break;
 	default:

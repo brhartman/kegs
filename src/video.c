@@ -1,8 +1,8 @@
-const char rcsid_video_c[] = "@(#)$KmKId: video.c,v 1.210 2024-01-15 02:57:49+00 kentd Exp $";
+const char rcsid_video_c[] = "@(#)$KmKId: video.c,v 1.213 2025-04-27 18:03:43+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2023 by Kent Dickey		*/
+/*			Copyright 2002-2025 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -568,7 +568,8 @@ video_init_kimage(Kimage *kimage_ptr, int width, int height,
 	x_xpos = video_clamp(x_xpos, 0, screen_width - 640);
 	x_ypos = video_clamp(x_ypos, 0, screen_height - 420);
 
-	kimage_ptr->wptr = (word32 *)calloc(1, width * height * 4);
+	kimage_ptr->wptr = (word32 *)calloc(1, width * (height + 2) * 4);
+		// Scaling routines read from line+1, expect it to be 0
 	kimage_ptr->a2_width_full = width;
 	kimage_ptr->a2_height_full = height;
 	kimage_ptr->a2_width = width;
