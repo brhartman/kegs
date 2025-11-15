@@ -1,8 +1,8 @@
-const char rcsid_moremem_c[] = "@(#)$KmKId: moremem.c,v 1.275 2021-12-19 22:44:39+00 kentd Exp $";
+const char rcsid_moremem_c[] = "@(#)$KmKId: moremem.c,v 1.283 2022-05-06 21:47:30+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2021 by Kent Dickey		*/
+/*			Copyright 2002-2022 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -32,6 +32,7 @@ extern Page_info page_info_rd_wr[];
 extern int Verbose;
 extern int g_rom_version;
 extern int g_user_page2_shadow;
+extern Iwm g_iwm;
 
 
 /* from iwm.c */
@@ -50,7 +51,6 @@ int	g_c023_val = 0;
 int	g_c029_val_some = 0x41;
 int	g_c02b_val = 0x08;
 int	g_c02d_int_crom = 0;
-int	g_c031_disk35 = 0;
 int	g_c033_data = 0;
 int	g_c034_val = 0;
 int	g_c035_shadow_reg = 0x08;
@@ -60,6 +60,8 @@ int	g_c041_val = 0;		/* C041_EN_25SEC_INTS, C041_EN_MOVE_INTS */
 int	g_c046_val = 0;
 int	g_c05x_annuncs = 0;
 int	g_c068_statereg = 0;
+word32	g_c06d_val = 0;
+word32	g_c06f_val = 0;
 int	g_c08x_wrdefram = 0;
 int	g_zipgs_unlock = 0;
 int	g_zipgs_reg_c059 = 0x5f;
@@ -89,7 +91,6 @@ Emustate_intlist g_emustate_intlist[] = {
 	EMUSTATE(g_c029_val_some),
 	EMUSTATE(g_c02b_val),
 	EMUSTATE(g_c02d_int_crom),
-	EMUSTATE(g_c031_disk35),
 	EMUSTATE(g_c033_data),
 	EMUSTATE(g_c034_val),
 	EMUSTATE(g_c035_shadow_reg),
@@ -309,7 +310,8 @@ fixup_intcx()
 		}
 		for(j = 0xc8; j < 0xd0; j++) {
 			/* c800 - cfff */
-			if(((g_c02d_int_crom & (1 << 3)) == 0) || intcx) {
+			if(((g_c02d_int_crom & (1 << 3)) == 0) || intcx ||
+							(g_rom_version == 0)) {
 				rom_inc = rom10000 + (j << 8);
 			} else {
 				/* c800 space not necessarily mapped */
@@ -1140,6 +1142,9 @@ io_read(word32 loc, double *cyc_ptr)
 			return IOR((g_cur_a2_stat & ALL_STAT_ST80));
 		case 0x19: /* c019: rdvblbar: MSB set if in VBL */
 			tmp = in_vblank(dcycs);
+			if(g_rom_version == 0) {	// Apple //e
+				tmp = tmp ^ 1;		// 1=not in VBL on //e
+			}
 			return IOR(tmp);
 		case 0x1a: /* c01a: rdtext */
 			return IOR(g_cur_a2_stat & ALL_STAT_TEXT);
@@ -1186,6 +1191,9 @@ io_read(word32 loc, double *cyc_ptr)
 			return g_c02b_val;
 		case 0x2c: /* 0xc02c */
 			/* printf("reading c02c, returning 0\n"); */
+			if(g_c06d_val == 0x40) {	// Test mode $40
+				return read_video_data(dcycs);
+			}
 			return 0;
 		case 0x2d: /* 0xc02d */
 			tmp = g_c02d_int_crom;
@@ -1200,7 +1208,7 @@ io_read(word32 loc, double *cyc_ptr)
 			return doc_read_c030(dcycs);
 		case 0x31: /* 0xc031 */
 			/* 3.5" control */
-			return g_c031_disk35;
+			return g_iwm.state & 0xc0;
 		case 0x32: /* 0xc032 */
 			/* scan int */
 			return 0;
@@ -1745,12 +1753,13 @@ io_write(word32 loc, int val, double *cyc_ptr)
 			(void)doc_read_c030(dcycs);
 			return;
 		case 0x31: /* 0xc031 */
-			tmp = val ^ g_c031_disk35;
-			if(tmp & 0x40) {
+			tmp = val ^ g_iwm.state;
+			iwm_flush_cur_disk();	// In case APPLE35SEL changes
+			g_iwm.state = (g_iwm.state & (~0xc0)) | (val & 0xc0);
+			if(tmp & IWM_STATE_C031_APPLE35SEL) {
 				/* apple35_sel changed, maybe speed change */
 				engine_recalc_events();
 			}
-			g_c031_disk35 = val & 0xc0;
 			return;
 		case 0x32: /* 0xc032 */
 			tmp = g_c023_val & 0x7f;
@@ -2027,15 +2036,28 @@ io_write(word32 loc, int val, double *cyc_ptr)
 		case 0x69: /* 0xc069 */
 			/* just ignore, someone writing c068 with m=0 */
 			return;
+		case 0x6a: /* 0xc06a */
+		case 0x6b: /* 0xc06b */
+			UNIMPL_WRITE;
 		case 0x6c: /* 0xc06c */
 			g_c06c_latched_cyc = (word32)((dword64)dcycs);
 			return;
-		case 0x6a: /* 0xc06a */
-		case 0x6b: /* 0xc06b */
 		case 0x6d: /* 0xc06d */
+			// Affect what reads to $C02C can see, only $40 now
+			if((g_c06f_val & 0x100) == 0) {		// Locked
+				val = 0;
+			}
+			g_c06d_val = val;			// Test mode
+			return;
 		case 0x6e: /* 0xc06e */
+			g_c06f_val = 0;
+			return;
 		case 0x6f: /* 0xc06f */
-			UNIMPL_WRITE;
+			if((g_c06f_val == 0xda) && (val == 0x61)) {
+				val |= 0x100;	// Unlock
+			}
+			g_c06f_val = val;
+			return;
 
 		/* 0xc070 - 0xc07f */
 		case 0x70: /* 0xc070 = Trigger paddles */
@@ -2159,9 +2181,11 @@ io_write(word32 loc, int val, double *cyc_ptr)
 		break;
 	case 1: case 2: case 5: case 6: case 7:
 		/* c1000 - c7ff (but not c3xx,c4xx) */
+		if((loc & 0xff) == 0) {		// Frogger writes $ff to $Cx00
+			return;
+		}
 		UNIMPL_WRITE;
 	case 3:
-		voc_devsel_write(loc, val, dcycs);
 		return;
 	case 4:
 		if((g_c02d_int_crom & 0x10) && !(g_c068_statereg & 1)) {
@@ -2237,7 +2261,7 @@ in_vblank(double dcycs)
 	lines_since_vbl = get_lines_since_vbl(dcycs);
 
 	if(lines_since_vbl >= 0xc000) {
-		return 1;
+		return 1;		// 1=in VBL
 	}
 
 	return 0;

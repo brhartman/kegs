@@ -1,8 +1,8 @@
-const char rcsid_macsnd_driver_c[] = "@(#)$KmKId: macsnd_driver.c,v 1.17 2021-08-17 00:08:26+00 kentd Exp $";
+const char rcsid_macsnd_driver_c[] = "@(#)$KmKId: macsnd_driver.c,v 1.20 2022-04-03 13:38:47+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2021 by Kent Dickey		*/
+/*			Copyright 2002-2022 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -26,12 +26,22 @@ const char rcsid_macsnd_driver_c[] = "@(#)$KmKId: macsnd_driver.c,v 1.17 2021-08
 #include <CoreAudio/CoreAudio.h>
 #include <unistd.h>
 
+// Mac OS X 12.0 deprecates kAudioObjectPropertyElementMaster.  So now we
+//  need to use kAudioObjectPropertyElementMain, and set it to ...Master if it
+//  isn't already set.  This is beyond dumb
+#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED)
+# if __MAC_OS_X_VERSION_MAX_ALLOWED < 120000
+#  define kAudioObjectPropertyElementMain kAudioObjectPropertyElementMaster
+# endif
+#endif
+
 #define MACSND_REBUF_SIZE	(64*1024)
 
 word32	g_macsnd_rebuf[MACSND_REBUF_SIZE];
 volatile int g_macsnd_rd_pos;
 volatile int g_macsnd_wr_pos;
 volatile int g_macsnd_playing = 0;
+int g_macsnd_channel_warn = 0;
 extern int g_sound_min_samples;			// About 33ms
 extern int g_sound_max_multiplier;		// About 6, so 6*33 ~= 200ms.
 
@@ -97,6 +107,10 @@ audio_callback(void *in_ref_ptr, AudioUnitRenderActionFlags *aura_flags_ptr,
 
 	for(i = 0; i < num_buffers; i++) {
 		num_channels = abuflist_ptr->mBuffers[i].mNumberChannels;
+		if((num_channels != 2) && !g_macsnd_channel_warn) {
+			printf("mNumberChannels:%d\n", num_channels);
+			g_macsnd_channel_warn = 1;
+		}
 		num_samps = abuflist_ptr->mBuffers[i].mDataByteSize / 4;
 		wptr = (word32 *)abuflist_ptr->mBuffers[i].mData;
 #if 0
@@ -134,7 +148,6 @@ int
 mac_send_audio(byte *ptr, int in_size)
 {
 	word32	*wptr, *macptr;
-	word32	*eptr;
 	int	samps, sample_num;
 	int	i;
 
@@ -142,7 +155,6 @@ mac_send_audio(byte *ptr, int in_size)
 	wptr = (word32 *)ptr;
 	sample_num = g_macsnd_wr_pos;
 	macptr = &(g_macsnd_rebuf[0]);
-	eptr = &g_macsnd_rebuf[MACSND_REBUF_SIZE];
 	for(i = 0; i < samps; i++) {
 		macptr[sample_num] = *wptr++;
 		sample_num++;
@@ -175,7 +187,7 @@ macsnd_init()
 
 	g_aopa.mSelector = kAudioHardwarePropertyDefaultOutputDevice;
 	g_aopa.mScope = kAudioObjectPropertyScopeGlobal;
-	g_aopa.mElement = kAudioObjectPropertyElementMaster;
+	g_aopa.mElement = kAudioObjectPropertyElementMain;
 
 	size = 4;
 	result = AudioObjectGetPropertyData(kAudioObjectSystemObject, &g_aopa,

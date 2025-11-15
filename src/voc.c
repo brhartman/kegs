@@ -1,8 +1,8 @@
-const char rcsid_voc_c[] = "@(#)$KmKId: voc.c,v 1.5 2021-12-20 18:34:58+00 kentd Exp $";
+const char rcsid_voc_c[] = "@(#)$KmKId: voc.c,v 1.8 2022-04-30 20:04:48+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2002-2021 by Kent Dickey		*/
+/*			Copyright 2002-2022 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -55,8 +55,14 @@ voc_devsel_read(word32 loc, double dcycs)
 	case 6:		// 0xc0b6
 		return g_voc_reg6;
 		break;
+	case 7:		// 0xc0b7, possible Uthernet 2 detection
+		return 0x00;
+		break;
 	case 8:		// 0xc0b8, Second Sight detection by jpeGS program
 		return 0x00;		// Second Sight returns 0x01
+		break;
+	case 0xd:	// 0xc0bd, A2OSX Uthernet 1 detection code
+		return 0x00;
 		break;
 	}
 
@@ -131,6 +137,18 @@ voc_devsel_write(word32 loc, word32 val, double dcycs)
 		g_voc_reg6 = val;
 		return;
 		break;
+	case 7:		// 0xc0b7
+		// Written by System Disk 1.1 Desktop.sys to 0xfd, ignore
+		if(val == 0xfd) {
+			return;
+		}
+		break;
+	case 0xa:
+	case 0xb:	// 0xc0ba,0xc0bb written to 0 by A2OSX Uthernet1 detect
+		if(val == 0) {
+			return;
+		}
+		break;
 	}
 	halt_printf("Unknown Write %04x = %02x %f\n", 0xc0b0 + loc, val, dcycs);
 }
@@ -189,7 +207,7 @@ voc_update_interlace(double dcycs)
 		// Interlace mode has changed
 		g_cur_a2_stat &= (~ALL_STAT_VOC_INTERLACE);
 		g_cur_a2_stat |= new_stat;
-		printf("Change VOC interlace mode: %d\n", new_stat);
+		printf("Change VOC interlace mode: %08x\n", new_stat);
 		change_display_mode(dcycs);
 	}
 }

@@ -1,8 +1,8 @@
-const char rcsid_dynapro_c[] = "@(#)$KmKId: dynapro.c,v 1.38 2021-12-20 04:56:04+00 kentd Exp $";
+const char rcsid_dynapro_c[] = "@(#)$KmKId: dynapro.c,v 1.44 2022-06-26 04:14:15+00 kentd Exp $";
 
 /************************************************************************/
 /*			KEGS: Apple //gs Emulator			*/
-/*			Copyright 2021 by Kent Dickey			*/
+/*			Copyright 2021-2022 by Kent Dickey		*/
 /*									*/
 /*	This code is covered by the GNU GPL v3				*/
 /*	See the file COPYING.txt or https://www.gnu.org/licenses/	*/
@@ -17,7 +17,11 @@ const char rcsid_dynapro_c[] = "@(#)$KmKId: dynapro.c,v 1.38 2021-12-20 04:56:04
 //  forked files are storage_type $5 from Technote tn-pdos-025.
 
 #include "defc.h"
-#include <dirent.h>
+#ifdef _WIN32
+# include "win_dirent.h"
+#else
+# include <dirent.h>
+#endif
 #include <time.h>
 
 #define DYNAPRO_PATH_MAX		2048
@@ -179,7 +183,7 @@ dynapro_free_file(Dynapro_file *fileptr, int check_map)
 	free(fileptr->buffer_ptr);
 	fileptr->buffer_ptr = 0;
 	fileptr->next_ptr = 0;
-	printf("FREE %p\n", fileptr);
+	// printf("FREE %p\n", fileptr);
 	if(check_map && (fileptr->map_first_block != 0)) {
 		printf(" ERROR: map_first_block is %08x\n",
 						fileptr->map_first_block);
@@ -196,7 +200,7 @@ dynapro_free_recursive_file(Dynapro_file *fileptr, int check_map)
 	if(!fileptr) {
 		return;
 	}
-	printf("free_recursive %s\n", fileptr->unix_path);
+	// printf("free_recursive %s\n", fileptr->unix_path);
 	while(fileptr) {
 		nextptr = fileptr->next_ptr;
 		dynapro_free_file(fileptr, check_map);
@@ -274,7 +278,7 @@ byte *
 dynapro_malloc_file(char *path_ptr, dword64 *dsize_ptr, int extra_size)
 {
 	byte	*bptr;
-	ssize_t	lret;
+	long long lret;
 	dword64	dsize, dpos;
 	int	fd;
 	int	i;
@@ -1330,10 +1334,11 @@ dynapro_create_prodos_name(Dynapro_file *newfileptr, Dynapro_file *matchptr,
 		if(inpos < max_inpos) {
 			c = str[inpos++];
 		}
-		g_dynapro_path_buf[outpos++] = c;
+		g_dynapro_path_buf[outpos] = c;
 		if(c == 0) {
 			break;
 		}
+		outpos++;
 		if((c >= 'A') && (c <= 'Z')) {
 			continue;		// This is legal
 		}
@@ -1358,7 +1363,7 @@ dynapro_create_prodos_name(Dynapro_file *newfileptr, Dynapro_file *matchptr,
 
 		// This is not legal.  Make it a '.'
 		if((c >= 0x20) && (c <= 0x7e)) {
-			g_dynapro_path_buf[outpos - 1] = '.';
+			g_dynapro_path_buf[outpos - 1] = '@';	// do '.' later
 		} else {
 			outpos--;		// Ignore it
 		}
@@ -1366,9 +1371,16 @@ dynapro_create_prodos_name(Dynapro_file *newfileptr, Dynapro_file *matchptr,
 
 	g_dynapro_path_buf[outpos] = 0;
 	// printf(" initial path_buf:%s, %d\n", &g_dynapro_path_buf[0], outpos);
-	while((outpos >= 0) && (g_dynapro_path_buf[outpos-1] == '.')) {
+	while((outpos >= 0) && (g_dynapro_path_buf[outpos-1] == '@')) {
+		// Remove trailing '@' since they are not useful
 		outpos--;
 		g_dynapro_path_buf[outpos] = 0;
+	}
+	for(i = 1; i < outpos; i++) {
+		// Convert '@' to '.' to make name legal
+		if(g_dynapro_path_buf[i] == '@') {
+			g_dynapro_path_buf[i] = '.';
+		}
 	}
 	if(outpos == 0) {
 		// Not a valid file, just skip it
@@ -1400,7 +1412,7 @@ dynapro_create_prodos_name(Dynapro_file *newfileptr, Dynapro_file *matchptr,
 		//			(char *)&(thisptr->prodos_name[1]));
 		len = strlen(&g_dynapro_path_buf[0]);
 		if((len == (thisptr->prodos_name[0] & 0xf)) &&
-				(strcasecmp(&g_dynapro_path_buf[0],
+				(cfgcasecmp(&g_dynapro_path_buf[0],
 				(char *)&(thisptr->prodos_name[1])) == 0)) {
 			printf(" that was a match\n");
 			dot_pos = 0;
@@ -1642,6 +1654,7 @@ dynapro_create_dir(Disk *dsk, char *unix_path, Dynapro_file *parent_ptr,
 		fileptr = dynapro_new_unix_file(&(g_dynapro_path_buf[0]),
 			head_ptr, head_ptr->next_ptr, storage_type);
 		if(fileptr == 0) {
+			closedir(opendirptr);
 			return 0;
 		}
 		prev_ptr->next_ptr = fileptr;
@@ -1652,6 +1665,7 @@ dynapro_create_dir(Disk *dsk, char *unix_path, Dynapro_file *parent_ptr,
 							&stat_buf.st_mtime);
 		if(fileptr->key_block == 0) {
 			printf("Allocating directory block failed\n");
+			closedir(opendirptr);
 			return 0;
 		}
 		fileptr->blocks_used = 1;
@@ -1659,23 +1673,27 @@ dynapro_create_dir(Disk *dsk, char *unix_path, Dynapro_file *parent_ptr,
 		dir_byte = dynapro_add_file_entry(dsk, fileptr, head_ptr,
 							dir_byte, 0x27);
 		if(dir_byte == 0) {
+			closedir(opendirptr);
 			return 0;
 		}
 		if(fmt == S_IFDIR) {
 			val = dynapro_create_dir(dsk, fileptr->unix_path,
 				fileptr, (fileptr->key_block << 9) + 4);
 			if(val == 0) {
+				closedir(opendirptr);
 				return 0;
 			}
 		} else {
 			val = dynapro_file_from_unix(dsk, fileptr);
 			if(val == 0) {
+				closedir(opendirptr);
 				return 0;
 			}
 		}
 		prev_ptr = fileptr;
 	}
 
+	closedir(opendirptr);
 	return dir_byte;
 }
 
@@ -1770,10 +1788,11 @@ dynapro_add_file_entry(Disk *dsk, Dynapro_file *fileptr, Dynapro_file *head_ptr,
 		fileptr->lastmod_time = 0x00060000;
 			// low 16 bits: file_count, upper 16 bits: bitmap_block
 		fileptr->header_pointer = dsk->raw_dsize >> 9;	// Total blocks
-		dynapro_set_word16(&bptr[0x1c], 0);
+		dynapro_set_word16(&bptr[0x1c], 0x0005);
 		dynapro_set_word16(&bptr[0x16], fileptr->upper_lower);
 	} else if(storage_type >= 0xe0) {		// Directory header
 		dynapro_set_word16(&bptr[0x11], 0);
+		dynapro_set_word16(&bptr[0x1c], 0x0005);
 		parent_ptr = fileptr->parent_ptr;		// subdir entry
 		if(parent_ptr == 0) {
 			printf("parent_ptr of %s is 0\n", fileptr->unix_path);

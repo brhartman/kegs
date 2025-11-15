@@ -1,4 +1,4 @@
-# $KmKId: makefile,v 1.43 2021-12-14 04:44:38+00 kentd Exp $
+# $KmKId: makefile,v 1.45 2022-06-13 13:14:21+00 kentd Exp $
 
 XOPTS_WIN = -Wall -fomit-frame-pointer -march=pentium
 
@@ -37,7 +37,7 @@ kegsmac: $(OBJECTS) $(OBJECTS1) compile_time.o $(SWIFTOBJS)
 	mkdir -p ../KEGSMAC.app/Contents/Resources/Base.lproj/
 	mkdir -p ../KEGSMAC.app/Contents/MacOS
 	mkdir -p ../KEGSMAC.app/Contents/Frameworks
-	PERL cp_kegs_libs kegsmac /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx ../KEGSMAC.app/Contents/Frameworks
+	$(PERL) cp_kegs_libs kegsmac /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx ../KEGSMAC.app/Contents/Frameworks
 	mv kegsmac ../KEGSMAC.app/Contents/MacOS/KEGSMAC
 	echo "APPL????" > ../KEGSMAC.app/Contents/PkgInfo
 	cp -f Info.plist ../KEGSMAC.app/Contents/
@@ -124,6 +124,13 @@ $(PROTO_OUT_pulseaudio_driver): $(PROTO_FILE_LIST_pulseaudio_driver) ldvars
 	rm -f $(PROTO_OUT_pulseaudio_driver)
 	mv tmp_protos.h $(PROTO_OUT_pulseaudio_driver)
 	cp -f $(PROTO_OUT_pulseaudio_driver) ..
+
+$(PROTO_OUT_windriver): $(PROTO_FILE_LIST_windriver) ldvars
+	$(KMKROOT)/bin/kmkproto_head $(PROTO_OUT_windriver) tmp_protos.h
+	cat /dev/null $(PROTO_FILE_LIST_windriver) >> tmp_protos.h
+	rm -f $(PROTO_OUT_windriver)
+	mv tmp_protos.h $(PROTO_OUT_windriver)
+	cp -f $(PROTO_OUT_windriver) ..
 
 
 compile_time.o: $(OBJECTS) $(OBJECTS1)
